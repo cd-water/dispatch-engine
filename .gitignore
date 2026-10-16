@@ -34,3 +34,4 @@ build/
 
 .codegraph
 deploy/docker/.env
+logs/
