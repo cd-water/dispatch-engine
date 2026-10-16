@@ -1,0 +1,10 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: dispatch-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/${POSTGRES_DB:dispatch_engine}
+    username: ${POSTGRES_USER:dispatchpostgres}
+    password: ${POSTGRES_PASSWORD:dispatchpostgres}
