@@ -34,10 +34,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Verifies the two guarantees that only a real PostgreSQL can prove: the
- * {@code uniq_driver_active_trip} partial index (ADR-0004) and the atomic idempotency claim
- * (ADR-0005). Both depend on behaviour a fake cannot model — the database arbitrating
- * between concurrent writers.
+ * 验证只有真实 PostgreSQL 才能证明的两个保证：{@code uniq_driver_active_trip} 部分索引
+ * （ADR-0004）和原子幂等抢占（ADR-0005）。两者都依赖 fake 无法建模的行为——由数据库在
+ * 并发写入者之间进行仲裁。
  */
 @Testcontainers
 @EnabledIf("containerRuntimeAvailable")
@@ -52,8 +51,8 @@ class DispatchPersistenceIT {
         }
     }
 
-    // Testcontainers 2 moved module classes into their own packages and dropped the
-    // self-type generic, so this is PostgreSQLContainer rather than PostgreSQLContainer<?>.
+    // Testcontainers 2 把模块类移进了各自的包，并去掉了自类型泛型，所以这里是
+    // PostgreSQLContainer 而不是 PostgreSQLContainer<?>。
     @Container
     @SuppressWarnings("resource")
     static final PostgreSQLContainer POSTGRES =
@@ -91,7 +90,7 @@ class DispatchPersistenceIT {
                 RiderId.newId(), PICKUP, DROPOFF, VehicleClass.STANDARD);
     }
 
-    /** Inserts a trip in a driver-holding state, bypassing the domain, to exercise the index. */
+    /** 绕过领域层直接插入一趟持有司机的行程，以检验索引。 */
     private void insertTripHoldingDriver(DriverId driver, String status) {
         jdbc.sql("""
                         INSERT INTO trips (id, rider_id, driver_id, status, vehicle_class,
@@ -149,8 +148,8 @@ class DispatchPersistenceIT {
                             """)
                     .query(String.class).single();
 
-            // The predicate must match TripStatus.holdsDriver(). If someone edits one side,
-            // this is the test that notices.
+            // 谓词必须与 TripStatus.holdsDriver() 一致。如果有人只改了其中一边，
+            // 就是这个测试会察觉到。
             assertThat(definition)
                     .contains("UNIQUE")
                     .contains("OFFERED")
@@ -168,8 +167,8 @@ class DispatchPersistenceIT {
             DriverId driver = DriverId.newId();
             insertTripHoldingDriver(driver, "ACCEPTED");
 
-            // This is the ADR-0004 guarantee: not a check in application code, a structural
-            // impossibility enforced by the database.
+            // 这就是 ADR-0004 的保证：不是应用代码里的检查，而是由数据库强制的结构性
+            // 不可能。
             assertThatThrownBy(() -> insertTripHoldingDriver(driver, "OFFERED"))
                     .isInstanceOf(org.springframework.dao.DuplicateKeyException.class);
         }
@@ -180,8 +179,7 @@ class DispatchPersistenceIT {
             DriverId driver = DriverId.newId();
             insertTripHoldingDriver(driver, "OFFERED");
 
-            // If OFFERED were outside the predicate, the race would stay open for the whole
-            // 8-second offer TTL.
+            // 如果 OFFERED 在谓词之外，竞争窗口会在整个 8 秒的报价 TTL 期间一直敞开着。
             assertThatThrownBy(() -> insertTripHoldingDriver(driver, "ACCEPTED"))
                     .isInstanceOf(org.springframework.dao.DuplicateKeyException.class);
         }
@@ -193,7 +191,7 @@ class DispatchPersistenceIT {
             insertTripHoldingDriver(driver, "COMPLETED");
             insertTripHoldingDriver(driver, "CANCELLED");
 
-            // Neither is in the predicate, so both coexist and the driver can take a new ride.
+            // 两者都不在谓词中，所以可以共存，司机也可以接新行程。
             insertTripHoldingDriver(driver, "ACCEPTED");
 
             Integer active = jdbc.sql("""
@@ -209,7 +207,7 @@ class DispatchPersistenceIT {
         @Test
         @DisplayName("many trips may share a NULL driver")
         void nullDriversDoNotCollide() {
-            // A partial unique index on a nullable column must not serialise unmatched rides.
+            // 可空列上的部分唯一索引绝不能把未匹配的行程串行化。
             for (int i = 0; i < 5; i++) {
                 requestRide.handle(command(), "key-" + i);
             }
@@ -240,8 +238,8 @@ class DispatchPersistenceIT {
             for (int i = 0; i < threads; i++) {
                 Thread.ofVirtual().start(() -> {
                     try {
-                        // Every thread blocks here, then all are released together — the
-                        // window this test exists to attack is milliseconds wide.
+                        // 每个线程都阻塞在这里，然后一起放行——这个测试要攻击的窗口
+                        // 只有几毫秒宽。
                         startGate.await();
                         RideRequestOutcome outcome = requestRide.handle(command, key);
                         kinds.add(outcome.kind());

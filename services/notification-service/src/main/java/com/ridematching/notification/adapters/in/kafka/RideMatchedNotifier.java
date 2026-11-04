@@ -10,15 +10,13 @@ import org.springframework.kafka.annotation.KafkaListener;
 import tools.jackson.databind.ObjectMapper;
 
 /**
- * Tells the rider a driver is on the way.
+ * 通知乘客司机正在赶来。
  *
- * <p>A separate consumer group from every other service, which is what makes the fan-out
- * independent: this service can be stopped, redeployed or crash without affecting matching
- * latency or the other consumers. The load test proves that by killing it mid-run.
+ * <p>与所有其他服务使用不同的消费者组，这正是让扇出相互独立的原因：停止、重新部署或崩溃
+ * 这个服务，都不会影响匹配延迟或其他消费者。负载测试通过在运行中途杀掉它来证明这一点。
  *
- * <p>Simulated rather than real — there is no push gateway or payment processor here, and
- * pretending otherwise would be dishonest. What is real is the decoupling, the consumer group
- * semantics, and the de-duplication.
+ * <p>是模拟而非真实——这里没有推送网关或支付处理器，假装有才是不诚实的。真实存在的是解耦、
+ * 消费者组语义和去重。
  */
 public class RideMatchedNotifier {
 
@@ -53,7 +51,7 @@ public class RideMatchedNotifier {
                     event.rideId(), event.driverId(), Math.round(event.distanceMeters()));
             handled.increment();
         } catch (RuntimeException e) {
-            // Forget the marker so the redelivery is a real retry rather than a silent drop.
+            // 忘掉标记，让重新投递成为一次真正的重试，而不是静默丢弃。
             processed.forget(event.eventId().toString());
             throw e;
         }

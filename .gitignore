@@ -1,12 +1,11 @@
-# Build
+# 构建
 #
-# Anchored with a leading slash where the name is a plausible PACKAGE name, not just a
-# build directory. An unanchored "out/" matches at ANY depth, and this project's hexagonal
-# layout has adapters/out/ — so it silently excluded the entire outbound adapter package,
-# including the Redis index, from version control. The build passed locally because the
-# files were on disk; a fresh clone would not have compiled.
+# 当名字是一个可能撞上 PACKAGE 名（而不仅是构建目录）时，用前导斜杠锚定到仓库根部。
+# 不带锚定的 "out/" 会在任意深度匹配，而本项目六边形架构的目录结构里有 adapters/out/
+# ——于是它把整个出站适配器包（包括 Redis 索引）悄悄排除出了版本控制。本地构建之所以
+# 能通过，是因为文件还在磁盘上；全新 clone 是编译不过的。
 #
-# target/ stays unanchored on purpose: Maven creates one per module, at every depth.
+# target/ 特意不加锚定：Maven 会在每个模块、每一层深度都各建一个。
 target/
 /build/
 /out/
@@ -22,6 +21,7 @@ target/
 
 # IDE
 .idea/
+.codegraph/
 *.iml
 *.ipr
 *.iws
@@ -30,24 +30,24 @@ target/
 .classpath
 .project
 
-# OS
+# 操作系统
 .DS_Store
 Thumbs.db
 
-# Scratch request payloads used when poking the API by hand
+# 手动调试 API 时使用的临时请求载荷
 ride.json
 *.request.json
 
-# Local env & secrets
+# 本地环境变量与密钥
 .env
 .env.*
 !.env.example
 *.local
 
-# Observability / load test output
+# 可观测性 / 负载测试输出
 k6-results/
 *.log
 logs/
 
-# Docker volumes
+# Docker 卷
 .data/

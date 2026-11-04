@@ -20,32 +20,29 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Converges Redis back to what PostgreSQL says about who is driving.
+ * 让 Redis 收敛回 PostgreSQL 关于"谁在开车"的说法。
  *
- * <p>Releasing a claim happens after the trip's terminal state commits, which leaves a window:
- * a crash in between hands back nothing, and because an accepted trip's claim marker has had
- * its TTL removed by {@code markOnTrip}, nothing expires to clean it up either. Left alone,
- * every such crash retires a driver permanently. Over a long load test that is a pool which
- * quietly drains, showing up as a falling match rate with no error anywhere to explain it.
+ * <p>释放认领发生在行程终态提交之后，这就留下了一个窗口：若在两者之间崩溃，则什么也不会交还；
+ * 而且由于已接受行程的认领标记已被 {@code markOnTrip} 去掉了 TTL，也没有任何过期机制来清理
+ * 它。放任不管的话，每次这样的崩溃都会永久退役一个司机。在一场长时间的负载测试中，这会让
+ * 司机池悄悄枯竭，表现为匹配率持续下降，却哪里都没有报错可以解释。
  *
- * <p>The direction of the sync is the design. PostgreSQL is the system of record (ADR-0004),
- * so this reads the claims Redis is holding and asks the database whether each is justified —
- * never the reverse. A reconciler that trusted Redis could delete a legitimate assignment.
+ * <p>同步的方向就是设计本身。PostgreSQL 是记录系统（ADR-0004），所以这里读取 Redis 持有的
+ * 认领，再向数据库询问每一个是否仍然合理——而不是反过来。一个信任 Redis 的调和器可能会删掉
+ * 一个合法的指派。
  *
- * <p><strong>Only claims with no TTL are candidates.</strong> That single condition removes
- * the race this kind of sweep usually has. A claim still carrying a TTL is either an offer in
- * flight — possibly one whose {@code RideMatched} event has not been consumed yet, so no trip
- * row exists to justify it — or an abandoned one that will expire on its own; touching either
- * is at best pointless and at worst steals a driver from a match that was about to land. A
- * claim with no TTL can only have been created by {@code markOnTrip}, which runs after an
- * acceptance commits. If that claim now has no trip holding it, the trip is finished and the
- * release was missed. Nothing else produces that combination.
+ * <p><strong>只有不带 TTL 的认领才是候选。</strong>仅凭这一个条件就消除了这类清扫通常具有
+ * 的竞态。仍带 TTL 的认领要么是一个在途报价——可能是其 {@code RideMatched} 事件尚未被消费，
+ * 因而还不存在可佐证的行程行——要么是一个会自行过期的遗留认领；动其中任何一个，轻则毫无
+ * 意义，重则从即将落地的匹配中抢走司机。不带 TTL 的认领只可能由 {@code markOnTrip} 创建，
+ * 而它运行于接受提交之后。如果这样的认领如今没有任何行程持有它，说明行程已经结束而释放被
+ * 遗漏了。没有其他情形会产生这种组合。
  */
 public class ClaimReconciler {
 
     private static final Logger log = LoggerFactory.getLogger(ClaimReconciler.class);
 
-    /** Redis reports this from {@code TTL} for a key that exists but has no expiry. */
+    /** Redis 对存在但无过期时间的键，{@code TTL} 会返回该值。 */
     private static final long NO_EXPIRY = -1L;
 
     private final StringRedisTemplate redis;
@@ -68,20 +65,18 @@ public class ClaimReconciler {
         this.keys = keys;
         this.scanBatch = scanBatch;
 
-        // Should sit at zero in a healthy run. A rising count means claims are leaking
-        // upstream and this is papering over it rather than the release path working — worth
-        // an alert, not just a graph.
+        // 健康运行时应当为零。计数上升意味着认领正在上游泄漏，而这里只是在遮掩问题，并非
+        // 释放路径在正常工作——值得告警，而不只是看一眼图。
         this.reclaimed = Counter.builder("driver.claim.reclaimed")
                 .description("Stranded claims released by the reconciler").register(meters);
     }
 
     /**
-     * One pass. Returns how many claims were reclaimed.
+     * 执行一轮。返回回收了多少个认领。
      *
-     * <p>{@code SCAN} rather than {@code KEYS}: this runs against the same Redis that serves
-     * every driver location update, and {@code KEYS} blocks the single command thread for the
-     * length of the keyspace. A cursor scan may miss a key that appears mid-pass, which is
-     * fine — the next pass sees it.
+     * <p>用 {@code SCAN} 而不是 {@code KEYS}：这段逻辑跑在为所有司机位置更新提供服务的
+     * 同一个 Redis 上，而 {@code KEYS} 会在整个键空间的时长内阻塞唯一的命令线程。游标扫描
+     * 可能漏掉在扫描途中出现的键，这没关系——下一轮会看到它。
      */
     public int reconcile() {
         List<Candidate> candidates = new ArrayList<>();
@@ -106,8 +101,8 @@ public class ClaimReconciler {
 
         int released = 0;
         for (Candidate candidate : withoutActiveTrip(candidates)) {
-            // Re-read the token now rather than during the scan: it must be the value the
-            // release script will compare against, and the claim may have turned over since.
+            // 现在重新读取令牌，而不是在扫描期间读取：它必须是释放脚本将要比对的同一个
+            // 值，而认领可能自那以后已经易主。
             String token = redis.opsForValue().get(candidate.key());
             if (token == null) {
                 continue;
@@ -122,10 +117,9 @@ public class ClaimReconciler {
     }
 
     /**
-     * Filters to the drivers PostgreSQL says are not on a trip.
+     * 过滤出 PostgreSQL 认为不在行程中的司机。
      *
-     * <p>One query for the whole batch rather than one per driver: a sweep that issues a round
-     * trip per key becomes a load source of its own.
+     * <p>整批只发一次查询，而不是每个司机一次：每键一次往返的清扫本身就变成了一个负载源。
      */
     private List<Candidate> withoutActiveTrip(List<Candidate> candidates) {
         List<UUID> ids = candidates.stream().map(candidate -> candidate.driverId()).toList();
@@ -144,7 +138,7 @@ public class ClaimReconciler {
                 .toList();
     }
 
-    /** Pulls the driver id out of a {@code claim:{city}:<uuid>} key. */
+    /** 从 {@code claim:{city}:<uuid>} 键中取出司机 id。 */
     private static Optional<UUID> driverIdOf(String key) {
         int lastColon = key.lastIndexOf(':');
         if (lastColon < 0 || lastColon == key.length() - 1) {
@@ -153,8 +147,8 @@ public class ClaimReconciler {
         try {
             return Optional.of(UUID.fromString(key.substring(lastColon + 1)));
         } catch (IllegalArgumentException e) {
-            // Not a driver claim key. Skipped rather than failing the pass: an unrelated key
-            // matching the pattern is a reason to ignore it, not to stop reconciling.
+            // 不是司机认领键。跳过而不是让整轮失败：一个恰好匹配模式的无关键，是忽略它的
+            // 理由，而不是停止调和的理由。
             return Optional.empty();
         }
     }

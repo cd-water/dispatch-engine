@@ -8,14 +8,14 @@ import java.time.Clock;
 import java.time.Instant;
 
 /**
- * Evicts drivers whose connection died without a close frame.
+ * 驱逐那些连接已死却没发出关闭帧的司机。
  *
- * <p>A half-open socket leaves a "ghost driver": still in the geospatial index, still returned
- * by proximity searches, and guaranteed never to answer an offer. Every ghost wastes a
- * candidate slot and an offer TTL, so matching latency degrades quietly as they accumulate.
+ * <p>半开套接字会留下"幽灵司机"：仍在地理空间索引里，仍会被邻近搜索返回，却注定永远不会
+ * 应答报价。每个幽灵都浪费一个候选名额和一次报价 TTL，所以随着它们积累，匹配延迟会悄悄
+ * 恶化。
  *
- * <p>TCP alone will not surface this — a socket with no traffic can stay open indefinitely
- * from the server's point of view. The last-seen sorted set is the ground truth instead.
+ * <p>仅靠 TCP 不会暴露这个问题——从服务器角度看，一个没有流量的套接字可以永远开着。改用
+ * 最后在线时间的有序集合作为事实依据。
  */
 public class StaleDriverReaper {
 
@@ -33,7 +33,7 @@ public class StaleDriverReaper {
         this.clock = clock;
     }
 
-    /** Sweeps once. Returns how many drivers were evicted. */
+    /** 清扫一次。返回驱逐了多少位司机。 */
     public int reap() {
         Instant cutoff = clock.instant().minus(properties.getStaleAfter());
         try {
@@ -43,9 +43,8 @@ public class StaleDriverReaper {
             }
             return evicted;
         } catch (RuntimeException e) {
-            // A scheduled task that throws is silently unscheduled by some executors, which
-            // would disable ghost eviction for the lifetime of the process. Swallow and
-            // report; the next sweep tries again.
+            // 某些执行器会悄悄取消抛异常的计划任务，那会让幽灵驱逐在整个进程生命周期内
+            // 失效。吞掉异常并报告；下一轮清扫会再试。
             log.warn("Stale driver sweep failed: {}", e.getMessage());
             return 0;
         }

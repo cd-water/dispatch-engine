@@ -13,15 +13,15 @@
   <description>Event-driven ride dispatch backend</description>
 
   <!--
-    Deliberately NOT inheriting from spring-boot-starter-parent. The BOM is imported
-    below instead, so this build owns its own plugin configuration and the domain
-    module can stay free of any Spring inheritance. See ADR-0001.
+    特意不从 spring-boot-starter-parent 继承，而是改为在下方导入 BOM，
+    这样这个构建就能拥有自己的插件配置，并且 domain
+    模块可以完全摆脱任何 Spring 继承关系。参见 ADR-0001。
   -->
 
   <!--
-    libs are listed individually: they share no common dependency set (domain has none
-    at all), so an aggregator would add a file without removing duplication.
-    services do share one, so they get a parent POM of their own.
+    libs 逐个列出：它们没有共同的依赖集合（domain 甚至一个都没有），
+    所以聚合器只会多出一个文件，却消不掉任何重复。
+    services 确实共享一个，因此它们有自己的父 POM。
   -->
   <modules>
     <module>libs/domain</module>
@@ -34,12 +34,12 @@
 
   <properties>
     <!--
-      Built and run on JDK 25 (LTS), but bytecode is deliberately still targeted at 21.
-      The reason for the upgrade is JEP 491 (JDK 24), which removed virtual-thread pinning
-      on synchronized blocks — a JVM RUNTIME behaviour, not a bytecode feature. Keeping the
-      release target at 21 gets the whole benefit with none of the toolchain risk: ArchUnit
-      and other bytecode readers never have to parse class-file version 69.
-      Raising this to 25 is a separate decision, to be made for language features on merit.
+      构建与运行在 JDK 25（LTS）上，但字节码仍刻意以 21 为目标。
+      升级的原因是 JEP 491（JDK 24），它移除了 synchronized 块上的虚拟线程
+      钉扎（pinning）——这是 JVM 运行时行为，而非字节码特性。把 release 目标
+      保持在 21，既获得全部收益，又不承担任何工具链风险：ArchUnit
+      和其他字节码读取器永远不必解析 class 文件版本 69。
+      把它提升到 25 是一个独立的决定，应根据语言特性本身的优劣来判断。
     -->
     <java.version>25</java.version>
     <maven.compiler.release>21</maven.compiler.release>
@@ -48,7 +48,7 @@
 
     <spring-boot.version>4.1.1</spring-boot.version>
     <archunit.version>1.3.0</archunit.version>
-    <!-- Mirrors the testcontainers.version property in spring-boot-dependencies 4.1.1. -->
+    <!-- 与 spring-boot-dependencies 4.1.1 中的 testcontainers.version 属性保持一致。 -->
     <testcontainers.version>2.0.5</testcontainers.version>
 
     <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
@@ -67,10 +67,9 @@
       </dependency>
 
       <!--
-        Pinned to the exact version spring-boot-dependencies declares in its
-        testcontainers.version property. Boot 4 sets that property but does not import the
-        BOM, so the import has to be explicit — while still tracking Boot's tested version
-        rather than being chosen independently.
+        固定为 spring-boot-dependencies 在其 testcontainers.version 属性中声明的
+        精确版本。Boot 4 设置了该属性却没有导入 BOM，因此这个导入必须显式写出 ——
+        同时仍然跟随 Boot 已测试过的版本，而不是独立挑选一个。
       -->
       <dependency>
         <groupId>org.testcontainers</groupId>
@@ -87,7 +86,7 @@
         <scope>test</scope>
       </dependency>
 
-      <!-- Internal modules: version declared once, referenced without one elsewhere. -->
+      <!-- 内部模块：版本只声明一次，其余地方引用时不带版本号。 -->
       <dependency>
         <groupId>com.ridematching</groupId>
         <artifactId>domain</artifactId>
@@ -126,14 +125,14 @@
           <configuration>
             <release>${maven.compiler.release}</release>
             <compilerArgs>
-              <!-- Keep parameter names at runtime: Spring and Jackson both rely on them. -->
+              <!-- 在运行时保留参数名：Spring 和 Jackson 都依赖它们。 -->
               <arg>-parameters</arg>
               <arg>-Xlint:all</arg>
             </compilerArgs>
           </configuration>
         </plugin>
 
-        <!-- Unit tests: *Test. Fast, no infrastructure. -->
+        <!-- 单元测试：*Test。速度快，不依赖任何基础设施。 -->
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
@@ -145,7 +144,7 @@
           </configuration>
         </plugin>
 
-        <!-- Integration tests: *IT. Testcontainers-backed, bound to verify. -->
+        <!-- 集成测试：*IT。由 Testcontainers 支撑，绑定到 verify 阶段。 -->
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-failsafe-plugin</artifactId>

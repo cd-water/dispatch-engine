@@ -10,15 +10,14 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Establishes the driver identity once, at handshake, and pins it to the session.
+ * 在握手时一次性建立司机身份，并把它固定到会话上。
  *
- * <p>This is the single point where a connection is bound to a driver. Every frame that
- * arrives later inherits that identity, which is why the frame body carries no id.
+ * <p>这是连接与司机绑定的唯一位置。之后到达的每一帧都继承该身份，这就是帧体不携带 id
+ * 的原因。
  *
- * <p><strong>Authentication is stubbed.</strong> The id is read from a query parameter, which
- * is fine for a simulation harness and unacceptable in production — a real deployment would
- * validate a signed token here and derive the id from its claims. Called out rather than
- * quietly left looking finished.
+ * <p><strong>认证是桩实现。</strong>id 从查询参数读取，这对模拟测试工具没问题，在生产中则
+ * 不可接受——真实部署会在这里校验签名令牌，并从其声明中推导出 id。明确指出来，而不是悄悄
+ * 留下一个看起来已经完成的样子。
  */
 public class DriverHandshakeInterceptor implements HandshakeInterceptor {
 
@@ -41,7 +40,7 @@ public class DriverHandshakeInterceptor implements HandshakeInterceptor {
                             new DriverId(UUID.fromString(pair.substring(eq + 1))));
                     return true;
                 } catch (IllegalArgumentException e) {
-                    return false; // rejects the handshake with 403
+                    return false; // 以 403 拒绝这次握手
                 }
             }
         }
@@ -53,6 +52,6 @@ public class DriverHandshakeInterceptor implements HandshakeInterceptor {
                                ServerHttpResponse response,
                                WebSocketHandler wsHandler,
                                Exception exception) {
-        // nothing to do
+        // 无事可做
     }
 }

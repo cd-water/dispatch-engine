@@ -1,4 +1,4 @@
-# Only the built jars are needed by the image; everything else just slows the build context.
+# 镜像只需要构建出来的 jar；其余内容只会拖慢构建上下文。
 .git
 .github
 docs

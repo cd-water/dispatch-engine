@@ -1,6 +1,6 @@
 global:
-  # 5s matches the load-test resolution: slower scraping smooths away the latency spikes the
-  # tests exist to find.
+  # 5s 与压测的采样分辨率一致：更慢的抓取会抹平延迟尖峰，而发现这些尖峰
+  # 正是压测存在的意义。
   scrape_interval: 5s
   evaluation_interval: 15s
   external_labels:
@@ -11,9 +11,9 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
-  # All six services expose the same endpoint on the same port inside the compose network,
-  # so one job with a target list beats six near-identical jobs. The "service" label comes
-  # from Micrometer's own `application` tag, set from spring.application.name.
+  # 六个服务在 compose 网络内都暴露同一个端点、同一个端口，所以一个带目标列表的
+  # job 胜过六个几乎相同的 job。"service" 标签来自 Micrometer 自身的 `application`
+  # 标签，由 spring.application.name 设置。
   - job_name: ride-matching
     metrics_path: /actuator/prometheus
     static_configs:
@@ -25,8 +25,8 @@ scrape_configs:
           - "notification-service:8080"
           - "billing-service:8080"
     relabel_configs:
-      # Strip the port so the instance label reads "dispatch-api" rather than
-      # "dispatch-api:8080" — every panel legend is shorter and the dashboards stay readable.
+      # 去掉端口，让 instance 标签显示为 "dispatch-api" 而不是
+      # "dispatch-api:8080" ——每个面板图例都更短，看板也保持可读。
       - source_labels: [__address__]
         regex: "([^:]+):.*"
         target_label: instance

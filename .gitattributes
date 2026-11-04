@@ -1,10 +1,9 @@
-# Normalize line endings. Without this, files checked out on Windows get CRLF and then
-# fail inside the Linux dev container: a shell script with CRLF dies with
-# "bad interpreter: /usr/bin/env bash^M", and CRLF in a Dockerfile ENTRYPOINT or a
-# compose command produces equally opaque failures.
+# 统一行尾符。没有这条规则，在 Windows 上检出的文件会变成 CRLF，随后在 Linux Dev
+# Container 中失败：带 CRLF 的 shell 脚本会因 "bad interpreter: /usr/bin/env bash^M"
+# 而崩溃，Dockerfile 的 ENTRYPOINT 或 compose 命令里出现 CRLF 也同样会产生难以理解的失败。
 * text=auto eol=lf
 
-# Files that must be LF regardless of platform.
+# 无论在哪个平台上都必须是 LF 的文件。
 *.sh        text eol=lf
 *.bash      text eol=lf
 *.yml       text eol=lf
@@ -20,12 +19,12 @@ Dockerfile  text eol=lf
 .gitattributes text eol=lf
 .gitignore  text eol=lf
 
-# Windows-only helpers keep CRLF.
+# 仅限 Windows 使用的辅助脚本保留 CRLF。
 *.bat       text eol=crlf
 *.cmd       text eol=crlf
 *.ps1       text eol=crlf
 
-# Binary: never touch.
+# 二进制文件：绝不改动。
 *.png       binary
 *.jpg       binary
 *.jpeg      binary

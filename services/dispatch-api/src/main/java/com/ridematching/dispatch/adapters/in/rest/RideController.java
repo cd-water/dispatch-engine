@@ -23,11 +23,10 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.UUID;
 
 /**
- * Ride request intake.
+ * 叫车请求入口。
  *
- * <p>Returns {@code 202 Accepted} rather than blocking until a driver is found. That is the
- * key latency decision in the system: the API's p99 stays in the tens of milliseconds no
- * matter how long matching takes, and a slow dispatch can never turn into request timeouts.
+ * <p>返回 {@code 202 Accepted}，而不是阻塞等到找到司机。这是系统中关键的延迟决策：无论匹配
+ * 耗时多久，API 的 p99 都保持在数十毫秒，缓慢的派单永远不会变成请求超时。
  */
 @RestController
 @RequestMapping("/v1/rides")
@@ -67,15 +66,15 @@ public class RideController {
         return switch (outcome.kind()) {
             case ACCEPTED -> accepted(outcome.rideId(), idempotencyKey);
 
-            // The original is still running. Retry-After tells the client to wait rather than
-            // hammer, which is what turns a retry storm into a queue.
+            // 原始请求仍在运行。Retry-After 告诉客户端等待而不是猛敲，这正是把重试风暴
+            // 变成排队的原因。
             case IN_PROGRESS -> ResponseEntity.status(HttpStatus.CONFLICT)
                     .header("Retry-After", "1")
                     .body(problem(HttpStatus.CONFLICT, "Request in progress",
                             "A request with this Idempotency-Key is still being processed."));
 
-            // Replay the stored response verbatim — the client gets the same rideId it would
-            // have got the first time, which is what it actually needs to continue.
+            // 原样重放已存储的响应——客户端拿到的是第一次就会拿到的同一个 rideId，这正是
+            // 它继续流程所需要的。
             case REPLAYED -> ResponseEntity.status(HttpStatus.OK)
                     .body(RideResponseDto.accepted(outcome.rideId().value()));
 
@@ -88,8 +87,7 @@ public class RideController {
     private ResponseEntity<RideResponseDto> accepted(RideId rideId, String idempotencyKey) {
         RideResponseDto body = RideResponseDto.accepted(rideId.value());
 
-        // Store the response before returning it, so a retry that arrives a millisecond later
-        // replays exactly what this caller received.
+        // 在返回之前先存储响应，这样一毫秒后到达的重试重放的，恰恰是这位调用方收到的东西。
         idempotency.complete(idempotencyKey, rideId.value(), HttpStatus.ACCEPTED.value(),
                 objectMapper.writeValueAsString(body));
 
@@ -120,8 +118,8 @@ public class RideController {
         }
     }
 
-    // Exception handling lives in RestExceptionHandler so every endpoint answers alike and a
-    // new controller does not need handlers copied into it.
+    // 异常处理放在 RestExceptionHandler 中，这样每个端点响应方式一致，新控制器也无须
+    // 复制一套处理器进去。
 
     private ProblemDetail problem(HttpStatus status, String title, String detail) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);

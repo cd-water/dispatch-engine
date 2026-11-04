@@ -9,22 +9,21 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * A trip's persisted state, flattened.
+ * 一个行程已持久化的状态，被拉平后的形态。
  *
- * <p>Exists so a persistence adapter has exactly one thing to map to and from, rather than
- * reaching into the aggregate field by field. {@link Trip#snapshot()} produces one and
- * {@link Trip#rehydrate} consumes one, so adding a field to the aggregate breaks both
- * directions at compile time instead of silently dropping a column on the way back in.
+ * <p>它的存在是为了让持久化适配器有且只有一个可以来回映射的东西，而不必
+ * 一个字段一个字段地伸进聚合内部。{@link Trip#snapshot()} 产出它、
+ * {@link Trip#rehydrate} 消费它，因此给聚合增加一个字段会让两个方向都在编译期一起报错，
+ * 而不是在写回的路上悄悄丢掉一列。
  *
- * <p>Deliberately not the aggregate itself: a record with public components has no invariants
- * and no transition guard, which is right for a row and wrong for a trip. Everything that
- * enforces the state machine stays in {@link Trip}.
+ * <p>刻意不把它做成聚合本身：一个带公开组件的 record 没有不变式、
+ * 也没有转换守卫，这对一行数据是合适的，对一个行程则是错的。所有
+ * 强制执行状态机的东西都留在 {@link Trip} 中。
  *
- * @param offerToken token from the Redis claim that reserved {@code driverId}. Needed to
- *                   release that claim later, and the reason it is stored rather than derived:
- *                   the matching engine's naming convention is that service's business, and a
- *                   second service reconstructing the string would couple the two to a format
- *                   nobody declared.
+ * @param offerToken 来自预留了 {@code driverId} 的那次 Redis 认领的令牌（offer token）。之后释放该认领
+ *                   需要用到它，而这也正是要把它存储下来而不是推导出来的原因：
+ *                   匹配引擎的命名约定是那个服务自己的事，由另一个服务去拼出这个字符串，
+ *                   会把两者耦合到一个从未有人声明过的格式上。
  */
 public record TripSnapshot(
         RideId id,
@@ -49,10 +48,10 @@ public record TripSnapshot(
         Objects.requireNonNull(status, "status");
         Objects.requireNonNull(requestedAt, "requestedAt");
 
-        // The same invariant the trips_driver_required_when_held CHECK constraint enforces in
-        // PostgreSQL, applied on the way out of the database as well as on the way in. A row
-        // that violates it is corrupt, and loading it into an aggregate would spread the
-        // corruption rather than surface it.
+        // 与 trips_driver_required_when_held CHECK 约束在 PostgreSQL 中强制执行的是同一条不变式，
+        // 既在写入数据库的方向上适用，也在从数据库读出的方向上适用。一条
+        // 违反它的行就是损坏的数据，把它加载进聚合只会扩散
+        // 损坏，而不是让它浮出水面。
         if (status.holdsDriver() && driverId == null) {
             throw new IllegalArgumentException(
                     "Trip %s is %s but has no driver".formatted(id, status));

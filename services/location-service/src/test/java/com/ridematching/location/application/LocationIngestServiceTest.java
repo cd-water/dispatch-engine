@@ -22,15 +22,15 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The ingest path with no Redis, no Spring and no containers — the whole point of putting the
- * index behind a port (ADR-0001). Runs in milliseconds.
+ * 不带 Redis、不带 Spring、不带容器的摄取路径——这正是把索引藏在端口后面的意义
+ * （ADR-0001）。毫秒级运行。
  */
 class LocationIngestServiceTest {
 
     private static final Instant T0 = Instant.parse("2026-09-04T10:00:00Z");
     private static final Coordinates ORIGIN = new Coordinates(30.0444, 31.2357);
 
-    /** Records what would have been written, so assertions are about behaviour not mocks. */
+    /** 记录本来会被写入什么，这样断言针对的是行为而不是 mock。 */
     private static final class RecordingIndex implements DriverLocationIndex {
         final List<DriverLocation> written = new ArrayList<>();
         final List<DriverId> online = new ArrayList<>();
@@ -82,9 +82,9 @@ class LocationIngestServiceTest {
                 Clock.fixed(T0, ZoneOffset.UTC));
     }
 
-    /** A position {@code metersEast} east of the origin, at {@code offset} after T0. */
+    /** 原点以东 {@code metersEast} 米、T0 之后 {@code offset} 时刻的位置。 */
     private DriverLocation frameAt(double metersEast, Duration offset) {
-        // ~111,320 m per degree of longitude at the equator, scaled by cos(latitude).
+        // 赤道上每度经度约 111,320 米，再按 cos(纬度) 缩放。
         double degreesPerMeter = 1.0 / (111_320.0 * Math.cos(Math.toRadians(ORIGIN.latitude())));
         Coordinates moved = new Coordinates(
                 ORIGIN.latitude(), ORIGIN.longitude() + metersEast * degreesPerMeter);
@@ -109,7 +109,7 @@ class LocationIngestServiceTest {
         void smallMovementIsThrottled() {
             service.ingest(frameAt(0, Duration.ZERO));
 
-            // 10 m is below the 25 m threshold, and only 1s has passed.
+            // 10 米低于 25 米阈值，且只过了 1 秒。
             assertThat(service.ingest(frameAt(10, Duration.ofSeconds(1)))).isFalse();
             assertThat(counter("location.frames.throttled")).isEqualTo(1.0);
         }
@@ -127,7 +127,7 @@ class LocationIngestServiceTest {
         void stationaryDriverStillRefreshed() {
             service.ingest(frameAt(0, Duration.ZERO));
 
-            // Parked, but the heartbeat must continue or the reaper would evict them.
+            // 停着没动，但心跳必须继续，否则清理器会驱逐他。
             assertThat(service.ingest(frameAt(0, Duration.ofSeconds(3)))).isTrue();
         }
 
@@ -146,11 +146,11 @@ class LocationIngestServiceTest {
         @DisplayName("throttle state is measured from the last WRITTEN frame, not the last seen")
         void throttleAnchorsOnPersistedPosition() {
             service.ingest(frameAt(0, Duration.ZERO));
-            service.ingest(frameAt(10, Duration.ofSeconds(1)));   // throttled
-            service.ingest(frameAt(20, Duration.ofSeconds(2)));   // still < 25m from origin
+            service.ingest(frameAt(10, Duration.ofSeconds(1)));   // 被节流
+            service.ingest(frameAt(20, Duration.ofSeconds(2)));   // 距原点仍 < 25 米
 
-            // Had the anchor moved to the throttled frames, this would look like 10m of
-            // movement and be dropped — the driver would drift 20m at a time, forever.
+            // 如果锚点跟着被节流的帧移动，这次看起来就只有 10 米移动而被丢弃——司机将永远
+            // 以每次 20 米的幅度漂移。
             assertThat(service.ingest(frameAt(30, Duration.ofSeconds(2)))).isTrue();
         }
     }
@@ -170,7 +170,7 @@ class LocationIngestServiceTest {
         @Test
         @DisplayName("a future-dated frame is rejected too")
         void rejectsFutureFrame() {
-            // A device with a fast clock would otherwise win "most recent" forever.
+            // 否则一个时钟走快的设备会永远赢得"最近一条"。
             DriverLocation future = new DriverLocation(driver, ORIGIN, 0, 0, T0.plusSeconds(120));
 
             assertThat(service.ingest(future)).isFalse();

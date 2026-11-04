@@ -10,11 +10,11 @@ import org.junit.jupiter.api.Test;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
- * Enforces the dependency rule from ADR-0001.
+ * 强制执行 ADR-0001 中的依赖规则。
  *
- * <p>Hexagonal architecture rots quietly: someone adds one Jackson annotation to a domain
- * record for convenience, and months later the domain module transitively depends on half
- * of Spring. A rule that is not checked is not a rule, so this runs in the build.
+ * <p>六边形架构会在无声中腐化：有人为了图方便给某个领域记录加上一个 Jackson 注解，
+ * 几个月后领域模块就传递依赖了半个 Spring。不被检查的规则算不上规则，所以这条
+ * 检查被纳入构建。
  */
 class ArchitectureTest {
 
@@ -35,9 +35,8 @@ class ArchitectureTest {
                         "org.springframework..",
                         "jakarta.persistence..",
                         "jakarta.validation..",
-                        // Both Jackson generations: Boot 4 ships Jackson 3 under tools.jackson,
-                        // and banning only the old package would have silently reopened the
-                        // hole this rule exists to close.
+                        // 两个代次的 Jackson 都要禁：Boot 4 把 Jackson 3 放在 tools.jackson 之下，
+                        // 只禁旧包名的话，这条规则本要堵住的漏洞会被无声地重新打开。
                         "com.fasterxml.jackson..",
                         "tools.jackson..",
                         "org.apache.kafka..",

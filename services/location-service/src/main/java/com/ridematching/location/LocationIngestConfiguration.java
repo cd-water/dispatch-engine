@@ -24,10 +24,10 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 import java.time.Clock;
 
 /**
- * Wires the ingest path together.
+ * 把摄取路径装配起来。
  *
- * <p>All Spring knowledge lives here, which is what keeps {@link LocationIngestService}, the
- * reaper and the adapters constructible by hand in tests (ADR-0001).
+ * <p>所有 Spring 知识都集中在这里，这正是 {@link LocationIngestService}、清理器和适配器在
+ * 测试中仍可手工构造的原因（ADR-0001）。
  */
 @Configuration
 @EnableWebSocket
@@ -55,7 +55,7 @@ public class LocationIngestConfiguration implements WebSocketConfigurer, Schedul
         return Clock.systemUTC();
     }
 
-    /** The key layout is shared with the matching engine, so it comes from geoindex. */
+    /** 键布局与匹配引擎共享，所以它来自 geoindex。 */
     @Bean
     public static RedisKeys redisKeys(LocationIngestProperties properties) {
         return new RedisKeys(properties.getCity());
@@ -89,17 +89,16 @@ public class LocationIngestConfiguration implements WebSocketConfigurer, Schedul
     }
 
     /**
-     * Schedules the flusher and the reaper programmatically.
+     * 以编程方式调度刷写器和清理器。
      *
-     * <p>Not {@code @Scheduled(fixedDelayString = "...")}: that attribute accepts only a plain
-     * millisecond count or an ISO-8601 string, so it cannot read the same {@code 50ms} value
-     * that {@code @ConfigurationProperties} binds happily. Registering here means the interval
-     * has exactly one definition — {@link LocationIngestProperties} — instead of the same
-     * number written twice in two syntaxes and free to drift.
+     * <p>不用 {@code @Scheduled(fixedDelayString = "...")}：该属性只接受纯毫秒数或 ISO-8601
+     * 字符串，无法读取 {@code @ConfigurationProperties} 能顺利绑定的同一个 {@code 50ms} 值。
+     * 在这里注册意味着间隔只有一个定义——{@link LocationIngestProperties}——而不是同一个
+     * 数字用两种语法写两遍、各自漂移。
      *
-     * <p>Fixed <em>delay</em>, not fixed rate: if a flush ever outlasts its interval, fixed
-     * rate would pile overlapping flushes onto a Redis that is already struggling. Fixed delay
-     * lets the batch grow instead, which is the cheaper failure and self-correcting.
+     * <p>固定<em>延迟</em>，不是固定频率：如果某次刷写耗时超过了间隔，固定频率会把重叠的
+     * 刷写堆到一个本已吃力的 Redis 上。固定延迟则让批量增长，这是更便宜的失败方式，而且会
+     * 自我纠正。
      */
     @Override
     public void configureTasks(ScheduledTaskRegistrar registrar) {

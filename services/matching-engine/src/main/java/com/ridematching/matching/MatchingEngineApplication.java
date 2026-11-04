@@ -4,10 +4,10 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 /**
- * Consumes ride requests, ranks candidates, claims drivers.
+ * 消费叫车请求、对候选排序、认领司机。
  *
- * <p>Runs on virtual threads (ADR-0006): blocking I/O to Redis, PostgreSQL and Kafka is
- * written as straight-line code, and the JVM unmounts the carrier thread while it waits.
+ * <p>运行于虚拟线程（ADR-0006）：对 Redis、PostgreSQL 和 Kafka 的阻塞 I/O 被写成直线式
+ * 代码，等待期间 JVM 会把载体线程卸载下来。
  */
 @SpringBootApplication
 public class MatchingEngineApplication {

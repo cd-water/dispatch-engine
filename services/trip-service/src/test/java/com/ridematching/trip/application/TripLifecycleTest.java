@@ -24,14 +24,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * The lifecycle, and specifically what happens to the driver at the end of it.
+ * 生命周期，尤其是行程结束时司机的去向。
  *
- * <p>Before these transitions existed, a claimed driver was never handed back by any code path
- * — {@code DriverClaimStore.release} was implemented, wired, and called by nothing. The pool
- * drained monotonically and the only thing returning drivers to it was the claim TTL, which is
- * a crash-safety valve rather than a lifecycle. Half of what is asserted here is therefore not
- * "the status changed" but "the driver is available again", because the status was never the
- * part that was broken.
+ * <p>在这些转换出现之前，被认领的司机从未被任何代码路径交还——{@code DriverClaimStore.release}
+ * 被实现、被装配，却无人调用。司机池单调地流失，唯一把司机送回去的是认领 TTL，而那是一个
+ * 崩溃安全阀，不是生命周期。因此这里断言的一半不是"状态变了"，而是"司机又可用"，
+ * 因为状态从来就不是坏掉的那部分。
  */
 class TripLifecycleTest {
 
@@ -55,7 +53,7 @@ class TripLifecycleTest {
         rideId = new RideId(java.util.UUID.randomUUID());
     }
 
-    /** A trip carried up to {@code target}, with the driver claimed as the matcher leaves them. */
+    /** 把行程推进到 {@code target}，司机处于匹配器认领后的状态。 */
     private void givenTripAt(TripStatus target) {
         Trip trip = Trip.request(rideId, RiderId.newId(),
                 new Coordinates(30.0444, 31.2357), new Coordinates(30.0561, 31.2394),
@@ -89,8 +87,8 @@ class TripLifecycleTest {
             TripStatus status = lifecycle.complete(rideId);
 
             assertThat(status).isEqualTo(TripStatus.COMPLETED);
-            // The assertion that matters. Without the release call in TripLifecycle this line
-            // fails while every status assertion in this file still passes.
+            // 真正重要的断言。没有 TripLifecycle 里的释放调用，这一行会失败，而本文件里
+            // 所有状态断言仍然全部通过。
             assertThat(claims.statusOf(driverId)).isEqualTo("AVAILABLE");
             assertThat(claims.holdsClaim(driverId)).isFalse();
         }
@@ -116,8 +114,8 @@ class TripLifecycleTest {
             givenTripAt(TripStatus.IN_PROGRESS);
             lifecycle.complete(rideId);
 
-            // COMPLETED is terminal. A duplicate request — a retried driver tap, a redelivered
-            // message — must not re-release a driver who has since been claimed for a new ride.
+            // COMPLETED 是终态。重复请求——司机重复点击、消息重新投递——绝不能把一个此后
+            // 已被新行程认领的司机再次释放。
             assertThatThrownBy(() -> lifecycle.complete(rideId))
                     .isInstanceOf(IllegalTripTransitionException.class);
         }
@@ -144,8 +142,8 @@ class TripLifecycleTest {
 
             lifecycle.cancel(rideId, "rider changed their mind");
 
-            // Trip.cancel() clears the assignment, so this only holds because the driver is
-            // read before the transition. Consumers need to know who was stood down.
+            // Trip.cancel() 会清空指派，所以这只在司机于转换之前被读取时才成立。
+            // 消费者需要知道被撤下的是谁。
             assertThat(trips.published())
                     .singleElement()
                     .isInstanceOfSatisfying(RideCancelled.class, event -> {
@@ -176,7 +174,7 @@ class TripLifecycleTest {
             assertThatThrownBy(() -> lifecycle.cancel(rideId, "changed my mind"))
                     .isInstanceOf(IllegalTripTransitionException.class);
 
-            // And the driver stays held. A rejected transition must not have side effects.
+            // 而且司机仍被持有。一次被拒绝的转换绝不能产生副作用。
             assertThat(claims.holdsClaim(driverId)).isTrue();
         }
     }
@@ -192,10 +190,8 @@ class TripLifecycleTest {
 
             lifecycle.accept(rideId);
 
-            // The claim TTL is sized for an offer, in seconds. A trip lasts far longer, and an
-            // expired marker would let the matching engine keep offering rides to a driver who
-            // is already committed — rejected at the index every time, but a candidate slot
-            // burned on each attempt.
+            // 认领 TTL 是按秒级的报价来定长的。行程持续得久得多，而过期的标记会让匹配引擎
+            // 不停给一个已经承诺的司机派单——每次都索引拒绝，但每次尝试都烧掉一个候选名额。
             assertThat(claims.isPinned(driverId)).isTrue();
             assertThat(claims.statusOf(driverId)).isEqualTo("ON_TRIP");
         }
@@ -235,9 +231,8 @@ class TripLifecycleTest {
             givenTripAt(TripStatus.IN_PROGRESS);
             claims.failWith(new IllegalStateException("connection refused"));
 
-            // The completion is already committed and the rider's trip genuinely finished.
-            // Failing the request here would report a successful trip as an error; the
-            // reconciler is what recovers the claim.
+            // 完成已经提交，乘客的行程确实结束了。在这里让请求失败，等于把一趟成功的行程
+            // 报告成错误；回收认领的是调和器。
             TripStatus status = lifecycle.complete(rideId);
 
             assertThat(status).isEqualTo(TripStatus.COMPLETED);

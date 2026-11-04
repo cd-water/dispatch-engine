@@ -1,116 +1,107 @@
-# Load Testing Methodology
+# 负载测试方法论
 
-> **Status: planned.** This document is the test plan written *before* the implementation, so the
-> targets cannot be retrofitted to whatever the code happens to produce. Results tables are marked
-> `TBD` and will be filled with real measurements plus Grafana screenshots.
-
----
-
-## Principles
-
-1. **Publish the harness, not just the numbers.** Everything below is reproducible from this repo
-   with one command; a benchmark you cannot re-run is a marketing claim.
-2. **State the environment.** Hardware, container limits, and dataset size are reported with every
-   result. "50k req/s" without a machine spec means nothing.
-3. **Report p99, not averages.** Mean latency hides exactly the tail that users experience.
-4. **Assert correctness under load.** Throughput with a broken invariant is not a passing result —
-   every run ends with a verification query.
-5. **Report failures.** If a target is missed, the number and the reason are published as-is. A
-   portfolio of only green results is not credible.
+> **状态：规划中。** 本文档是在实现*之前*写下的测试计划，这样目标就无法根据代码碰巧跑出来的结果来事后修饰。
+> 结果表格标记为 `TBD`，之后会填入真实测量值以及 Grafana 截图。
 
 ---
 
-## Environment (to be recorded per run)
+## 原则
 
-| Item | Value |
-|---|---|
-| Host CPU / RAM | TBD |
-| Docker resource limits per service | TBD |
-| JVM flags | Per service, set in `ops/docker-compose.yml`: **ZGC** on dispatch-api, location-service and matching-engine (the three with p99 SLOs); **SerialGC** on notification, billing and trip-service. `MaxRAMPercentage=50` against an explicit `mem_limit`. No pinning flag: JEP 491 made `jdk.tracePinnedThreads` a no-op on JDK 24+ |
-| Memory ceilings | infra 1216 MB, app services 2112 MB, observability 704 MB — **4032 MB total**. The dev container must be stopped first; both modes together exceed the VM |
-| Redis / Postgres / Kafka versions | 7.x / 16 / 3.7 KRaft |
-| Load generator location | Same host (network latency excluded — stated explicitly) |
+1. **公开测试工具本身，而不只是数字。** 下面的一切都可以用一条命令从本仓库复现；一个无法重跑的基准测试只是一个营销话术。
+2. **写明环境。** 硬件、容器限制和数据集规模要随每份结果一起报告。没有机器规格的 "50k req/s" 毫无意义。
+3. **报告 p99，而不是平均值。** 平均延迟恰好掩盖了用户实际经历的那段尾部。
+4. **在负载下断言正确性。** 带着被破坏的不变量的吞吐量不是一个通过的结果 ——
+   每次运行都以一条验证查询收尾。
+5. **报告失败。** 如果没达标，数字和原因都要原样公布。只有绿色结果的作品集是不可信的。
 
 ---
 
-## Scenarios
+## 环境（每次运行都要记录）
 
-### S1 — Location ingestion soak
-
-| | |
+| 项目 | 值 |
 |---|---|
-| **Goal** | Sustain the write path at target volume |
-| **Load** | 10,000 driver WebSockets, 1 Hz, 10 minutes, drivers moving on a simulated road grid |
-| **Pass** | ≥ 9,500 effective updates/s; ingest p99 < 50 ms; zero connection drops; `location_frames_dropped_total` = 0 |
-
-### S2 — Ride request burst
-
-| | |
-|---|---|
-| **Goal** | Behavior at the request-rate ceiling |
-| **Load** | Ramp 0 → 500 ride req/s over 2 min, hold 5 min, against a warm 10k-driver pool |
-| **Pass** | API p99 < 120 ms; end-to-end match p99 < 500 ms; match success ≥ 95%; error rate < 0.1% |
-
-### S3 — Contention stress (the headline test)
-
-| | |
-|---|---|
-| **Goal** | Force the concurrency invariant to fail if it can |
-| **Load** | 5,000 ride requests concentrated in a 1 km² area against only 200 available drivers |
-| **Pass** | **Zero** drivers with more than one active trip; every request resolves to `ACCEPTED` or `UNMATCHED`; no unhandled exceptions; contention counter is non-zero (proving the race was actually exercised — a green result with zero contention proves nothing) |
-
-Watch `trip_assignment_rejected_total` alongside `driver_claim_contention_total`. The first counts
-losses at the Redis claim, the second losses at the unique index — the two layers, each visible. A run
-where the index never fires has not reached past layer one.
-
-### S3b — Driver pool conservation
-
-| | |
-|---|---|
-| **Goal** | Prove drivers come back, so the other scenarios measure the design and not a leak |
-| **Load** | 2,000 trips driven to a terminal state — a 70/30 split of `complete` and `cancel` — against a fixed 500-driver pool, sustained long enough for each driver to be reused several times |
-| **Pass** | `driver_claim_released_total` ≈ completions + cancellations; the number of drivers `RESERVED`/`ON_TRIP` in Redis at the end matches the trips still in flight; `driver_claim_reclaimed_total` = 0; match success rate flat across the run |
-
-The last two are the ones with teeth. A rising reclaim count means the release path is failing and
-the reconciler is covering for it, and a match rate that *declines* over a run against a fixed pool is
-the signature of a pool draining — which is exactly the state the system was in before the lifecycle
-was wired up, and which every other scenario here would have silently inherited.
-
-### S4 — Idempotency under retry storm
-
-| | |
-|---|---|
-| **Goal** | Duplicate suppression at concurrency |
-| **Load** | 1,000 unique keys, each fired 5× simultaneously |
-| **Pass** | Exactly 1,000 rides created; all responses for a key carry the same `rideId` |
-
-### S5 — Chaos: dependency failure
-
-| | |
-|---|---|
-| **Goal** | Verify degradation is graceful, not catastrophic |
-| **Steps** | Under S2 load: (a) kill notification-service; (b) `docker pause` Redis for 10 s; (c) kill a matching-engine instance |
-| **Pass** | (a) matching latency unaffected, consumer lag recovers to zero on restart with no lost events; (b) API returns `503` rather than hanging, full recovery within 5 s of resume; (c) partitions rebalance, no ride lost or double-assigned |
-
-### S6 — Breaking point
-
-| | |
-|---|---|
-| **Goal** | Find and report the actual limit |
-| **Load** | Ramp ride requests until p99 > 1 s or errors > 1% |
-| **Output** | The number, plus which resource saturated (CPU / Redis / connection pool / consumer lag) |
+| 宿主机 CPU / RAM | TBD |
+| 每个服务的 Docker 资源限制 | TBD |
+| JVM 参数 | 每个服务在 `ops/docker-compose.yml` 中设置：dispatch-api、location-service 和 matching-engine 上是 **ZGC**（带 p99 SLO 的三个服务）；notification、billing 和 trip-service 上是 **SerialGC**。`MaxRAMPercentage=50` 配合显式的 `mem_limit`。不设 pinning 相关参数：JEP 491 已让 `jdk.tracePinnedThreads` 在 JDK 24+ 上变为空操作 |
+| 内存上限 | infra 1216 MB，应用服务 2112 MB，可观测性 704 MB — **合计 4032 MB**。必须先停止开发容器；两种模式加在一起会超出虚拟机 |
+| Redis / Postgres / Kafka 版本 | 7.x / 16 / 3.7 KRaft |
+| 负载生成器位置 | 同一台主机（已排除网络延迟 —— 此处明确说明） |
 
 ---
 
-## Tooling
+## 场景
 
-- **k6** for HTTP scenarios (S2, S4, S6) — `loadtest/scenarios/*.js`
-- **Java simulator** for WebSocket load (S1, S3) — one virtual thread per driver, moving on a road
-  grid with realistic speed and turn distributions
-- **Prometheus** scraping every service at 5 s; **Grafana** dashboards provisioned as committed JSON
-- **`docker pause` / `docker kill`** for chaos steps (S5)
+### S1 — 位置上报浸泡测试（soak test）
 
-Run:
+| | |
+|---|---|
+| **目标** | 在目标量级下维持写入路径 |
+| **负载** | 10,000 个司机 WebSocket，1 Hz，10 分钟，司机在模拟的路网上移动 |
+| **通过** | ≥ 9,500 有效更新/s；ingest p99 < 50 ms；零连接断开；`location_frames_dropped_total` = 0 |
+
+### S2 — 叫车请求突发
+
+| | |
+|---|---|
+| **目标** | 请求速率上限处的行为 |
+| **负载** | 2 分钟内从 0 爬升到 500 叫车请求/s，再维持 5 分钟，针对一个已预热的 10k 司机池 |
+| **通过** | API p99 < 120 ms；端到端匹配 p99 < 500 ms；匹配成功率 ≥ 95%；错误率 < 0.1% |
+
+### S3 — 竞争压力测试（主打测试）
+
+| | |
+|---|---|
+| **目标** | 强制让并发不变量失败，只要它可能失败 |
+| **负载** | 5,000 个叫车请求集中在一个 1 km² 区域内，而可用司机只有 200 个 |
+| **通过** | 持有多于一个活跃行程的司机数量为 **零**；每个请求最终都落在 `ACCEPTED` 或 `UNMATCHED`；无未处理异常；竞争计数器非零（证明竞态确实被触发了 —— 一个竞争次数为零的绿色结果什么都证明不了） |
+
+观察 `trip_assignment_rejected_total` 时要同时看 `driver_claim_contention_total`。前者统计在 Redis 认领环节的失败，后者统计在唯一部分索引（unique partial index）处的失败 —— 两层防线，各自可见。如果一次运行中索引从未生效，说明它还没突破第一层。
+
+### S3b — 司机池守恒
+
+| | |
+|---|---|
+| **目标** | 证明司机会回来，这样其他场景测量的才是设计本身而不是一个泄漏 |
+| **负载** | 2,000 个行程被推进到终态 —— `complete` 与 `cancel` 按 70/30 分配 —— 针对一个固定的 500 司机池，持续时间足够让每个司机被复用多次 |
+| **通过** | `driver_claim_released_total` ≈ 完成数 + 取消数；结束时 Redis 中处于 `RESERVED`/`ON_TRIP` 状态的司机数与仍在途的行程数一致；`driver_claim_reclaimed_total` = 0；匹配成功率在整个运行过程中保持平稳 |
+
+最后两项才是真正有杀伤力的。回收（reclaim）计数持续上升意味着释放路径在失效、而清理器在替它兜底；而针对固定司机池的匹配率在运行过程中*下降*，正是司机池被抽干的标志性特征 —— 这恰恰是生命周期逻辑接上之前系统所处的状态，
+而这里的其他每个场景都会悄无声息地继承这个状态。
+
+### S4 — 重试风暴下的幂等性
+
+| | |
+|---|---|
+| **目标** | 并发下的重复抑制 |
+| **负载** | 1,000 个唯一键，每个同时触发 5 次 |
+| **通过** | 恰好创建 1,000 个行程；同一个键的所有响应都携带相同的 `rideId` |
+
+### S5 — 混沌：依赖故障
+
+| | |
+|---|---|
+| **目标** | 验证降级是优雅的，而不是灾难性的 |
+| **步骤** | 在 S2 负载下：(a) 杀掉 notification-service；(b) 对 Redis 执行 `docker pause` 10 秒；(c) 杀掉一个 matching-engine 实例 |
+| **通过** | (a) 匹配延迟不受影响，重启后消费者组（consumer group）延迟恢复到零且无事件丢失；(b) API 返回 `503` 而不是挂起，恢复后 5 秒内完全恢复；(c) 分区重新均衡，无叫车请求丢失或被双重派单 |
+
+### S6 — 崩溃点
+
+| | |
+|---|---|
+| **目标** | 找到并报告真实的极限 |
+| **负载** | 持续增加叫车请求，直到 p99 > 1 s 或错误率 > 1% |
+| **输出** | 那个数字，以及哪个资源达到饱和（CPU / Redis / 连接池 / 消费者延迟） |
+
+---
+
+## 工具
+
+- HTTP 场景（S2、S4、S6）用 **k6** — `loadtest/scenarios/*.js`
+- WebSocket 负载（S1、S3）用 **Java 模拟器（simulator）** — 每个司机一个虚拟线程（virtual thread），在路网上以真实的速度和转向分布移动
+- **Prometheus** 以 5 秒间隔抓取每个服务；**Grafana** 仪表盘以已提交的 JSON 形式预置
+- 混沌步骤（S5）用 **`docker pause` / `docker kill`**
+
+运行：
 
 ```bash
 docker compose -f ops/docker-compose.yml up -d
@@ -119,9 +110,9 @@ docker compose -f ops/docker-compose.yml up -d
 
 ---
 
-## Post-run correctness gate
+## 运行后正确性门禁
 
-Every scenario ends with this query. A non-empty result fails the run regardless of latency numbers.
+每个场景都以这条查询收尾。只要结果非空，无论延迟数字如何，该次运行都判为失败。
 
 ```sql
 SELECT driver_id, count(*) AS active_trips
@@ -132,19 +123,18 @@ HAVING count(*) > 1;
 -- Expected: 0 rows
 ```
 
-Plus: no records in any `*.dlt` topic, and every `ride.requested` event reconciles to exactly one
-terminal state.
+另外：任何 `*.dlt` 主题（死信，dead letter）中都没有记录，并且每条 `ride.requested` 事件都对账到恰好一个终态。
 
 ---
 
-## Results
+## 结果
 
-| Scenario | Target | Measured | Grafana |
+| 场景 | 目标 | 实测 | Grafana |
 |---|---|---|---|
-| S1 Ingestion soak | 10k updates/s, p99 < 50 ms | TBD | TBD |
-| S2 Request burst | 500 req/s, match p99 < 500 ms | TBD | TBD |
-| S3 Contention | 0 double-assignments | TBD | TBD |
-| S3b Pool conservation | 0 leaked claims | TBD | TBD |
-| S4 Idempotency | 0 duplicate rides | TBD | TBD |
-| S5 Chaos | Graceful degradation | TBD | TBD |
-| S6 Breaking point | — | TBD | TBD |
+| S1 上报浸泡测试 | 10k 更新/s，p99 < 50 ms | TBD | TBD |
+| S2 请求突发 | 500 req/s，匹配 p99 < 500 ms | TBD | TBD |
+| S3 竞争 | 0 次双重派单 | TBD | TBD |
+| S3b 司机池守恒 | 0 个泄漏的认领 | TBD | TBD |
+| S4 幂等性 | 0 个重复行程 | TBD | TBD |
+| S5 混沌 | 优雅降级 | TBD | TBD |
+| S6 崩溃点 | — | TBD | TBD |

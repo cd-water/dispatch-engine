@@ -1,6 +1,5 @@
-# Only what is specific to this service. Everything else — virtual threads, actuator
-# exposure, graceful shutdown, metric tags — comes from platform-defaults.yml, which
-# ships inside the platform module on the classpath.
+# 仅包含本服务特有的配置。其余一切——虚拟线程、actuator 暴露、优雅停机、
+# 指标标签——都来自 platform-defaults.yml，它随 platform 模块一起位于 classpath 上。
 spring:
   application:
     name: location-service
@@ -10,8 +9,8 @@ spring:
 server:
   port: 8081
 
-# Ingest tuning. Defaults live in LocationIngestProperties; these make the values the load
-# tests sweep visible in one place rather than buried in Java.
+# 摄取调优。默认值位于 LocationIngestProperties；把这些值放在这里，是为了让压测扫描的
+# 参数集中可见，而不是埋在 Java 代码里。
 ridematching:
   location:
     min-movement-meters: 25

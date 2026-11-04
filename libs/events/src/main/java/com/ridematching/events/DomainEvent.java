@@ -4,27 +4,26 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Contract every published event satisfies.
+ * 每一个被发布的事件都必须满足的契约。
  *
- * <p>Kafka delivery is at-least-once (ADR-0003), so consumers de-duplicate on
- * {@link #eventId()}. That makes the id part of the contract rather than metadata:
- * an event without a stable id cannot be safely consumed twice.
+ * <p>Kafka 的投递是至少一次（at-least-once）（ADR-0003），因此消费者按 {@link #eventId()}
+ * 去重。这使 id 成为契约的一部分而非元数据：没有稳定 id 的事件无法被安全地消费两次。
  *
- * <p>{@link #partitionKey()} is what preserves ordering. Events sharing a key land on
- * one partition and are therefore strictly ordered relative to each other — which is why
- * ride events key on the ride id and location events key on the driver id.
+ * <p>{@link #partitionKey()} 是保序的关键。共享同一个键的事件落在同一个分区上，
+ * 因而彼此之间是严格有序的——这正是行程事件以行程 id 作为分区键（partition key）、
+ * 位置事件以司机 id 作为分区键的原因。
  */
 public interface DomainEvent {
 
-    /** Stable, unique per event instance. Redelivery repeats it; a retry does not change it. */
+    /** 稳定，且对每个事件实例唯一。重投递会重复它；重试不会改变它。 */
     UUID eventId();
 
-    /** When the event actually happened, not when it was published. */
+    /** 事件实际发生的时刻，而不是它被发布的时刻。 */
     Instant occurredAt();
 
-    /** Kafka partition key. Determines both ordering and consumer fan-out. */
+    /** Kafka 分区键。同时决定顺序与消费者的扇出。 */
     String partitionKey();
 
-    /** Destination topic, including its version suffix (e.g. {@code ride.matched.v1}). */
+    /** 目标 topic，包含其版本后缀（例如 {@code ride.matched.v1}）。 */
     String topic();
 }

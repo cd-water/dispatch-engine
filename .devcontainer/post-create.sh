@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Runs once after the dev container is created. Verifies the toolchain and that every
-# infrastructure dependency is actually reachable, so a broken environment fails here
-# with a clear message rather than later inside a confusing build error.
+# 在 Dev Container 创建完成后运行一次。校验工具链，并确认每一条基础设施依赖都真正可达，
+# 这样损坏的环境会在这里以清晰的消息失败，而不是稍后在令人费解的构建错误中失败。
 set -euo pipefail
 
-# Podman creates named-volume mount points owned by root, but this container runs as
-# "vscode" (uid 1000). Without this, the very first `mvn` fails with
-# "Could not create local repository at /home/vscode/.m2/repository".
-# Cheap and idempotent, so it runs unconditionally rather than being a documented
-# manual step someone hits once per rebuild.
+# Podman 创建的命名卷挂载点归 root 所有，但这个容器以 "vscode"（uid 1000）运行。
+# 没有这一步，第一次运行 `mvn` 就会失败，报
+# "Could not create local repository at /home/vscode/.m2/repository"。
+# 这一步开销极小且幂等，因此无条件执行，而不是写成一篇文档里的手动步骤、
+# 让人在每次重建时都撞上一次。
 if [ ! -w "${HOME}/.m2" ]; then
   echo "==> Taking ownership of ${HOME}/.m2 (root-owned volume mount)"
   sudo chown -R "$(id -u):$(id -g)" "${HOME}/.m2"

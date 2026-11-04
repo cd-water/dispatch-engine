@@ -1,8 +1,8 @@
 {
   "name": "Ride-Matching Engine (Java 21)",
 
-  // Compose-based dev container: the workspace is a SIBLING of the infrastructure
-  // containers on one network, not a Docker-in-Docker host. See ADR-0007.
+  // 基于 Compose 的 Dev Container：工作区容器与基础设施容器位于同一网络、互为兄弟节点，
+  // 而不是 Docker-in-Docker 宿主机。参见 ADR-0007。
   "dockerComposeFile": [
     "../ops/docker-compose.yml",
     "docker-compose.dev.yml"
@@ -10,13 +10,12 @@
   "service": "workspace",
   "workspaceFolder": "/workspace",
 
-  // Infra that comes up with the dev container. Prometheus and Grafana are in the
-  // "observability" profile and stay down until Phase 7 to keep startup light.
+  // 随 Dev Container 一起启动的基础设施。Prometheus 和 Grafana 位于 "observability"
+  // profile 中，在第 7 阶段之前保持停机，以保持启动轻量。
   "runServices": ["workspace", "postgres", "redis", "kafka"],
 
-  // Stop (not remove) the containers when the VS Code window closes. Named volumes
-  // survive, so Postgres data and Kafka log dirs persist across sessions. Use "none"
-  // to leave the stack running after closing the editor.
+  // 关闭 VS Code 窗口时停止（而非移除）容器。命名卷会保留下来，因此 Postgres 数据和
+  // Kafka 日志目录能跨会话持久化。设为 "none" 可在关闭编辑器后让整套服务继续运行。
   "shutdownAction": "stopCompose",
 
   "features": {
@@ -38,10 +37,9 @@
         "ms-kubernetes-tools.vscode-kubernetes-tools"
       ],
       "settings": {
-        // Must match JAVA_HOME in the base image. The devcontainers/java image installs
-        // Microsoft OpenJDK under /usr/lib/jvm, not the SDKMAN layout — pointing this at
-        // a path that does not exist makes the Java extension report "no JDK installed"
-        // and offer to download one.
+        // 必须与基础镜像中的 JAVA_HOME 一致。devcontainers/java 镜像把 Microsoft OpenJDK
+        // 安装在 /usr/lib/jvm 下，而不是 SDKMAN 的目录结构 —— 若把这里指向一个不存在的路径，
+        // Java 扩展会报告 "no JDK installed" 并提示下载一个 JDK。
         "java.configuration.runtimes": [
           {
             "name": "JavaSE-25",
@@ -57,8 +55,8 @@
     }
   },
 
-  // Host ports are published by the compose files so tools on Windows (psql, redis-cli,
-  // a browser) can reach the stack too. These entries just make VS Code surface them.
+  // 主机端口由 compose 文件发布，这样 Windows 上的工具（psql、redis-cli、浏览器）也能
+  // 访问这套服务。这些条目只是让 VS Code 把它们展示出来。
   "forwardPorts": [8080, 5432, 6379, 9092, 9090, 3000],
   "portsAttributes": {
     "8080": { "label": "Dispatch API" },

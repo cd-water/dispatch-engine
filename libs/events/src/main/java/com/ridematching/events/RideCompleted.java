@@ -4,19 +4,18 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * A trip finished normally. The driver has been handed back to the pool.
+ * 一次行程正常结束。司机已被归还到可用司机池。
  *
- * <p>Billing's trigger: this is the first event in the stream that means a fare is owed.
- * {@link RideMatched} says a driver was assigned, which is not the same thing — an assignment
- * that ends in a cancellation bills nothing.
+ * <p>这是计费的触发点：事件流中第一个意味着产生了车费的信号。
+ * {@link RideMatched} 只表示司机被指派了，两者不是一回事——以取消收场的指派不产生任何费用。
  *
- * @param eventId    unique per event instance
- * @param rideId     the ride, and the partition key
- * @param driverId   who drove it
- * @param distanceMeters straight-line pickup-to-dropoff distance. Not a routed distance, and
- *                       therefore not a fare: a real platform bills on the actual path driven.
- *                       Named for what it is rather than dressed up as something it is not.
- * @param occurredAt when the rider was dropped off
+ * @param eventId    对每个事件实例唯一
+ * @param rideId     行程本身，同时是分区键
+ * @param driverId   执驾该行程的司机
+ * @param distanceMeters 上车点到下车点的直线距离。这不是按路线计算的里程，因此也不是车费：
+ *                       真实的平台按实际行驶路径计费。这个字段以它的真实含义命名，
+ *                       而不是把自己包装成别的样子。
+ * @param occurredAt 乘客下车的时刻
  */
 public record RideCompleted(
         UUID eventId,

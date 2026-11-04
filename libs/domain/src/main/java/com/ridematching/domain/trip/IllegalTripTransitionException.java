@@ -1,20 +1,19 @@
 package com.ridematching.domain.trip;
 
 /**
- * Thrown when a trip is asked to move to a state it cannot legally reach.
+ * 当行程被要求迁移到一个它无法合法到达的状态时抛出。
  *
- * <p>These are genuinely exceptional — a duplicate Kafka delivery, a late offer response
- * racing an acceptance, or a bug. Adapters translate this into a {@code 409 Conflict}
- * rather than a {@code 500}: the request was well-formed, the trip was simply not in a
- * state where it made sense.
+ * <p>这类情况确实属于例外——一次重复的 Kafka 投递、一条迟到的报价响应
+ * 与一次接受相互竞争，或者一个 bug。适配器会把它转换为 {@code 409 Conflict}
+ * 而不是 {@code 500}：请求本身是格式良好的，只是行程并不处于
+ * 让这个操作有意义的状态。
  */
 public class IllegalTripTransitionException extends RuntimeException {
 
     /**
-     * Declared explicitly rather than left to the compiler. These exceptions are never
-     * serialised across a wire today, but an implicit value changes whenever the class
-     * shape changes, which turns a harmless refactor into a deserialisation failure the
-     * day something does serialise one.
+     * 显式声明，而不是留给编译器去生成。如今这些异常从不在网络上
+     * 被序列化，但一旦类的形态发生变化，隐式生成的值就会跟着变，
+     * 这会把一次无害的重构，在某天真有东西序列化它的那天，变成一次反序列化失败。
      */
     private static final long serialVersionUID = 1L;
 

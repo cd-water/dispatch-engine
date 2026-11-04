@@ -3,22 +3,21 @@ package com.ridematching.dispatch.application;
 import com.ridematching.domain.trip.RideId;
 
 /**
- * Result of a ride request, mapping one-to-one onto the ADR-0005 response table.
+ * 叫车请求的结果，与 ADR-0005 的响应表一一对应。
  *
- * <p>A sealed-style enum of outcomes rather than exceptions for the non-error paths: a retry
- * arriving mid-flight is ordinary behaviour, not an exceptional condition, and modelling it
- * as a return value keeps it out of stack traces and error dashboards.
+ * <p>对非错误路径用类似密封的枚举结果而不是异常：在途时到达的重试是普通行为，而不是异常
+ * 状况；把它建模为返回值，就让它不会出现在堆栈和错误仪表盘里。
  */
 public record RideRequestOutcome(Kind kind, RideId rideId, Integer replayStatus, String replayBody) {
 
     public enum Kind {
-        /** First request with this key: work enqueued. HTTP 202. */
+        /** 该键的第一次请求：工作已入队。HTTP 202。 */
         ACCEPTED,
-        /** Retry while the original is still running. HTTP 409 + Retry-After. */
+        /** 原始请求仍在运行时的重试。HTTP 409 + Retry-After。 */
         IN_PROGRESS,
-        /** Retry after completion: replay the stored response verbatim. */
+        /** 完成之后的重试：原样重放已存储的响应。 */
         REPLAYED,
-        /** Same key, different body. HTTP 422 — a client bug. */
+        /** 相同的键、不同的请求体。HTTP 422——客户端 bug。 */
         KEY_REUSE
     }
 

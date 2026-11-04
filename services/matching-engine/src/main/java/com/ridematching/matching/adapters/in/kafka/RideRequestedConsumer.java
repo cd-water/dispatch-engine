@@ -17,11 +17,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Consumes ride requests and runs the matching loop.
+ * 消费叫车请求并运行匹配循环。
  *
- * <p>This is where the request path and the dispatch path finally separate: the API returned
- * {@code 202} long ago, and everything here happens on its own schedule against its own
- * consumer group.
+ * <p>请求路径与派单路径最终在这里分道扬镳：API 早就返回了 {@code 202}，这里的一切都按自己
+ * 的节奏、在自己的消费者组里进行。
  */
 public class RideRequestedConsumer {
 
@@ -50,8 +49,7 @@ public class RideRequestedConsumer {
     public void onRideRequested(String payload) {
         RideRequested request = objectMapper.readValue(payload, RideRequested.class);
 
-        // Delivery is at-least-once, so a redelivered request must not claim a second driver
-        // for a ride that already has one.
+        // 投递是至少一次的，所以重新投递的请求绝不能为一趟已经有司机的行程再认领第二个司机。
         if (!processed.markIfFirst(request.eventId().toString())) {
             log.debug("Skipping duplicate ride request event {}", request.eventId());
             return;
@@ -60,8 +58,8 @@ public class RideRequestedConsumer {
         try {
             handle(request);
         } catch (RuntimeException e) {
-            // Un-mark so the redelivery actually retries. Leaving the marker in place would
-            // turn one transient failure into a permanently dropped ride.
+            // 撤销标记，让重新投递真正重试。保留标记会把一次暂时性失败变成一趟永久丢失的
+            // 行程。
             processed.forget(request.eventId().toString());
             throw e;
         }
@@ -69,8 +67,8 @@ public class RideRequestedConsumer {
 
     private void handle(RideRequested request) {
         Coordinates pickup = new Coordinates(request.pickupLat(), request.pickupLng());
-        // The offer token is derived from the ride, not random, so a retry of the same ride
-        // produces the same token and can recognise its own earlier claim.
+        // 报价令牌由行程派生，而不是随机的，所以同一趟行程的重试会产生相同的令牌，并能
+        // 认出自己先前的认领。
         String offerToken = "offer-" + request.rideId();
 
         Optional<DriverMatcher.MatchedDriver> match = matcher.match(pickup, offerToken);
@@ -86,8 +84,7 @@ public class RideRequestedConsumer {
                     driver.distanceMeters(),
                     clock.instant()));
         } else {
-            // Published rather than dropped: a rider whose request quietly evaporates is worse
-            // than one told no driver was available.
+            // 发布而不是丢弃：请求悄悄蒸发的乘客处境，比被告知没有可用司机的乘客更糟。
             publish(new RideUnmatched(
                     UUID.randomUUID(),
                     request.rideId(),

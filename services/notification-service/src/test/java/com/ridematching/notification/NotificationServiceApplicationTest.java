@@ -9,9 +9,8 @@ import org.springframework.context.ApplicationContext;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Smoke test: the context starts and the shared platform auto-configuration is picked up.
- * Catches the common wiring mistakes (missing bean, bad property, clashing config) before
- * anything more expensive runs.
+ * 冒烟测试：上下文能启动，共享平台的自动配置被拾取。在运行任何更昂贵的东西之前，抓住常见
+ * 的装配错误（缺少 bean、错误的属性、冲突的配置）。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class NotificationServiceApplicationTest {

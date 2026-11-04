@@ -1,16 +1,14 @@
--- Initial schema for the ride-matching engine.
+-- 叫车匹配引擎的初始模式（schema）。
 --
--- Schema ownership note: these migrations live in their own module because two services now
--- write these tables — dispatch-api creates trips, trip-service moves them through the
--- lifecycle. A schema kept inside one of its consumers is a schema that consumer can change
--- without the other noticing. Both run Flyway from this same set at startup, which is safe:
--- Flyway takes a PostgreSQL advisory lock, so the second starter waits and then finds
--- nothing to do. See libs/schema/pom.xml.
+-- 模式所有权说明：这些模式迁移（Flyway/V1/V2）放在独立模块中，因为现在有两个服务都会写入这些表
+-- —— dispatch-api 创建行程，trip-service 推动它走完生命周期。把模式放在某一个消费方内部，
+-- 等于允许该消费方在另一个服务毫无察觉的情况下改动模式。两者启动时都从同一套脚本运行 Flyway，这是安全的：
+-- Flyway 会获取一把 PostgreSQL 咨询锁（advisory lock），因此后启动的一方会先等待，随后发现无事可做。
+-- 参见 libs/schema/pom.xml。
 --
--- No PostGIS yet, deliberately. ADR-0002 keeps PostGIS for geofences and zone analytics, and
--- none of those queries exist. Plain numeric columns hold the coordinates until there is a
--- query that needs a spatial index; adding an extension before it does costs an image change
--- and buys nothing.
+-- 刻意暂不引入 PostGIS。ADR-0002 把 PostGIS 留给地理围栏与区域分析，而这些查询目前都不存在。
+-- 在出现需要空间索引的查询之前，坐标先用普通数值列存放；在此之前就加装扩展，只会徒增一次镜像变更，
+-- 却换不来任何好处。
 
 CREATE TYPE trip_status AS ENUM (
     'REQUESTED',
@@ -32,7 +30,7 @@ CREATE TABLE trips (
     status         trip_status   NOT NULL,
     vehicle_class  vehicle_class NOT NULL,
 
-    -- Fencing token from the Redis claim (ADR-0004). Null until a driver is offered.
+    -- 来自 Redis 认领（claim）的围栏令牌（fence token）（ADR-0004）。在司机被报价之前为 NULL。
     fence_token    BIGINT,
 
     pickup_lat     DOUBLE PRECISION NOT NULL,
@@ -44,7 +42,7 @@ CREATE TABLE trips (
     matched_at     TIMESTAMPTZ,
     completed_at   TIMESTAMPTZ,
 
-    -- Optimistic locking for the short, contended updates (accept/decline/cancel).
+    -- 乐观锁（optimistic locking），用于那些短暂且存在竞争的更新（接单/拒单/取消）。
     version        INTEGER       NOT NULL DEFAULT 0,
 
     CONSTRAINT trips_driver_required_when_held
@@ -56,15 +54,15 @@ CREATE TABLE trips (
 );
 
 -- =====================================================================================
--- THE correctness guarantee (ADR-0004).
+-- 正确性保证本身（ADR-0004）。
 --
--- A driver can appear in at most one row whose status holds them. Redis claims are a
--- contention optimiser; this index is what makes double-assignment physically impossible.
--- It survives Redis loss, an expired lease, a network partition, and a GC pause.
+-- 在任何一行"占用司机"状态的记录里，同一个司机最多只能出现一次。Redis 认领只是缓解竞争的优化手段；
+-- 真正让重复指派在物理上不可能发生的，是这个唯一部分索引（unique partial index）。
+-- 它能扛住 Redis 数据丢失、租约过期、网络分区以及 GC 停顿。
 --
--- The predicate must stay identical to TripStatus.holdsDriver() in the domain module.
--- A state the domain treats as holding a driver but the index ignores is a hole in the
--- guarantee; TripStatusTest asserts the two agree.
+-- 谓词必须与 domain 模块中的 TripStatus.holdsDriver() 保持完全一致。
+-- 若某个状态在领域语义上被视为占用司机，而这个索引却未覆盖，保证就出现了漏洞；
+-- TripStatusTest 断言两者一致。
 -- =====================================================================================
 CREATE UNIQUE INDEX uniq_driver_active_trip
     ON trips (driver_id)
@@ -73,7 +71,7 @@ CREATE UNIQUE INDEX uniq_driver_active_trip
 CREATE INDEX idx_trips_rider_requested_at ON trips (rider_id, requested_at DESC);
 CREATE INDEX idx_trips_status ON trips (status) WHERE status NOT IN ('COMPLETED', 'CANCELLED', 'UNMATCHED');
 
--- Append-only audit trail: the in-memory Trip.history() made durable.
+-- 只追加（append-only）的审计追踪：把内存中的 Trip.history() 持久化。
 CREATE TABLE trip_events (
     id          BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     trip_id     UUID        NOT NULL REFERENCES trips (id),
@@ -87,17 +85,16 @@ CREATE TABLE trip_events (
 CREATE INDEX idx_trip_events_trip ON trip_events (trip_id, occurred_at);
 
 -- =====================================================================================
--- Idempotency (ADR-0005).
+-- 幂等（ADR-0005）。
 --
--- The primary key is the arbitration mechanism: two simultaneous retries both attempt the
--- insert and exactly one wins. A read-then-write check would have a window between the two
--- where both see "not found".
+-- 主键就是仲裁机制：两个同时到达的重试都会尝试插入，而恰好只有一个能成功。
+-- 若采用先读后写的检查，两次操作之间会存在一个窗口，双方都读到"不存在"。
 -- =====================================================================================
 CREATE TABLE idempotency_keys (
     key             TEXT PRIMARY KEY,
 
-    -- SHA-256 of the canonical request body. Catches a client reusing one key for a
-    -- different request, which must be a loud error rather than a silent replay.
+    -- 规范化请求体的 SHA-256。用于发现客户端把同一个键复用在不同请求上的情况，
+    -- 这必须是一次响亮的报错，而不是一次静默的重放。
     request_hash    TEXT        NOT NULL,
 
     state           TEXT        NOT NULL CHECK (state IN ('IN_PROGRESS', 'COMPLETED')),
@@ -109,14 +106,14 @@ CREATE TABLE idempotency_keys (
     expires_at      TIMESTAMPTZ NOT NULL
 );
 
--- Supports the pruning job; partial so it stays small.
+-- 为清理任务提供支持；部分索引（partial）使其保持较小的体积。
 CREATE INDEX idx_idempotency_expiry ON idempotency_keys (expires_at);
 
 -- =====================================================================================
--- Transactional outbox (ADR-0003).
+-- 事务性发件箱（transactional outbox）（ADR-0003）。
 --
--- Written in the SAME transaction as the state change it describes, so "the trip is saved"
--- and "the event will be published" commit together. A publisher drains it to Kafka.
+-- 与它所描述的状态变更写在同一个事务里，因此"行程已保存"与"事件必将发布"会一起提交。
+-- 由发布器把它排空到 Kafka。
 -- =====================================================================================
 CREATE TABLE outbox (
     id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -129,6 +126,6 @@ CREATE TABLE outbox (
     published_at TIMESTAMPTZ
 );
 
--- Partial index: the publisher only ever scans unpublished rows, so the index stays the
--- size of the backlog rather than the size of history.
+-- 部分索引：发布器只扫描未发布的行，因此索引始终只有积压（backlog）的规模，
+-- 而不是全部历史的规模。
 CREATE INDEX idx_outbox_unpublished ON outbox (id) WHERE published_at IS NULL;

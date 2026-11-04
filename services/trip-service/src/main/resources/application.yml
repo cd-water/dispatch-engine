@@ -1,6 +1,5 @@
-# Only what is specific to this service. Everything else — virtual threads, actuator
-# exposure, graceful shutdown, metric tags — comes from platform-defaults.yml, which
-# ships inside the platform module on the classpath.
+# 仅包含本服务特有的配置。其余一切——虚拟线程、actuator 暴露、优雅停机、
+# 指标标签——都来自 platform-defaults.yml，它随 platform 模块一起位于 classpath 上。
 spring:
   application:
     name: trip-service
@@ -12,28 +11,27 @@ spring:
     username: ${POSTGRES_USER:ride}
     password: ${POSTGRES_PASSWORD:ride}
     hikari:
-      # Smaller than dispatch-api's 20. That service fields every ride request; this one
-      # handles four lifecycle transitions per trip plus two background loops, so its
-      # concurrency ceiling is genuinely lower. Both pools draw on one PostgreSQL, and
-      # sizing each for its own peak rather than copying a number is what keeps the sum
-      # inside what the database can serve.
+      # 比 dispatch-api 的 20 小。那个服务承接每一次叫车请求；这个服务只处理每趟行程的
+      # 四次生命周期转换，外加两个后台循环，因此并发上限确实更低。两个连接池共用同一个
+      # PostgreSQL；按各自的峰值设定大小，而不是照抄一个数字，才能让总和保持在
+      # 数据库能承载的范围内。
       maximum-pool-size: 10
       minimum-idle: 2
       connection-timeout: 3000
 
   flyway:
     enabled: true
-    # Migrations come from the shared schema module, not this service. dispatch-api runs the
-    # identical set; Flyway's advisory lock makes the concurrent startup safe.
+    # 迁移来自共享的 schema 模块，而不是本服务。dispatch-api 运行完全相同的迁移集合；
+    # Flyway 的咨询锁让并发启动是安全的。
     baseline-on-migrate: false
 
 ridematching:
   trip:
-    # How often to drain the outbox to Kafka. An event sitting here is a notification the
-    # rider has not received, so this is on the critical timeline, not a housekeeping job.
+    # 多久把发件箱排空到 Kafka。滞留在这里的事件，就是乘客还没收到的通知，
+    # 因此它处于关键时间线上，而不是一项清理工作。
     outbox-interval: PT0.2S
-    # How often to sweep Redis for claims PostgreSQL says nothing is holding. A safety net for
-    # a crash between the terminal commit and the release, not a hot path — see ClaimReconciler.
+    # 多久扫描一次 Redis，释放 PostgreSQL 认为无人持有的认领。这是针对“终态提交与释放
+    # 之间崩溃”的安全网，不是热路径——见 ClaimReconciler。
     reconcile-interval: PT30S
 
 server:

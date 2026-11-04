@@ -21,11 +21,11 @@ import java.time.Clock;
 import java.time.Duration;
 
 /**
- * Wires the matching engine.
+ * 装配匹配引擎。
  *
- * <p>The Redis key layout comes from the shared geoindex module rather than being rebuilt
- * here — this service searches the same index location-service writes, and two independent
- * key-string implementations would eventually diverge into two disjoint namespaces.
+ * <p>Redis 键布局来自共享的 geoindex 模块，而不是在这里重建——这个服务搜索的正是
+ * location-service 写入的同一个索引，而两份各自独立的键字符串实现最终会分叉成两个互不相交
+ * 的命名空间。
  */
 @Configuration
 @EnableConfigurationProperties(MatchingProperties.class)

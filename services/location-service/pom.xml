@@ -15,10 +15,10 @@
   <name>location-service</name>
   <description>WebSocket GPS ingestion into the Redis geospatial index.</description>
 
-  <!-- Common dependencies and the Spring Boot repackage goal are inherited from
-       services/pom.xml. Add only what is specific to this service. -->
+  <!-- 公共依赖和 Spring Boot 的 repackage goal 都继承自
+       services/pom.xml。这里只添加本服务特有的内容。 -->
   <dependencies>
-    <!-- Brings the Redis key layout, the index port and its adapter. -->
+    <!-- 引入 Redis 键布局、索引端口及其适配器。 -->
     <dependency>
       <groupId>com.ridematching</groupId>
       <artifactId>geoindex</artifactId>
@@ -34,7 +34,7 @@
 
     <dependency>
       <groupId>org.testcontainers</groupId>
-      <!-- Renamed from "junit-jupiter" in Testcontainers 2.x. -->
+      <!-- 在 Testcontainers 2.x 中由 "junit-jupiter" 更名而来。 -->
       <artifactId>testcontainers-junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>

@@ -3,16 +3,14 @@ package com.ridematching.trip.application;
 import com.ridematching.domain.trip.RideId;
 
 /**
- * The trip changed between being read and being written.
+ * 行程在读取与写入之间发生了变化。
  *
- * <p>Optimistic locking, not pessimistic: the contended window here is microseconds wide and
- * the collision rate is low, so taking a row lock for every read would cost more than the rare
- * retry it saves. What matters is that the collision is *detected* — a last-writer-wins update
- * would let a driver's acceptance silently overwrite a rider's cancellation, which is exactly
- * the class of bug this system exists to demonstrate the absence of.
+ * <p>乐观锁而非悲观锁：这里的争用窗口只有几微秒宽，冲突率很低，所以每次读取都加行锁的
+ * 成本会超过它省下的偶发重试。关键在于冲突要被<em>检测到</em>——一个"最后写入者获胜"的
+ * 更新会让司机的接受悄悄覆盖乘客的取消，而这类 bug 正是这个系统要证明其不存在的对象。
  *
- * <p>Surfaces as {@code 409 Conflict} with a {@code Retry-After}. The caller re-reads and
- * decides again, because the right action genuinely depends on what the other writer did.
+ * <p>以 {@code 409 Conflict} 加 {@code Retry-After} 呈现。调用方重新读取后重新决策，
+ * 因为正确的动作确实取决于另一个写入者做了什么。
  */
 public class ConcurrentTripModificationException extends RuntimeException {
 

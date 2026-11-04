@@ -1,119 +1,77 @@
-# ADR-0008: Track supported dependency versions, and how the Spring Boot 4 upgrade went
+# ADR-0008：跟踪受支持的依赖版本，以及 Spring Boot 4 升级是如何完成的
 
-**Status:** Accepted · **Date:** 2026-09-04
+**状态：** 已接受 · **日期：** 2026-09-04
 
-## Context
+## 背景
 
-The project was started on **Spring Boot 3.3.5**. OSS support for the 3.3 line ended on
-**2025-06-30** — over a year before the first commit here. The version was chosen from memory as
-"a recent 3.x" and pinned because it was known to resolve, not because it was current. Nobody
-checked the support calendar until the Spring tooling started emitting end-of-support warnings.
+本项目启动时使用的是 **Spring Boot 3.3.5**。3.3 线的 OSS 支持已于 **2025-06-30** 结束——比这里的第一次提交还早了一年多。这个版本是凭记忆选的"一个较新的 3.x"，之所以固定（pin）下来只是因为已知它能正常解析，而不是因为它仍是当前版本。在 Spring 工具链开始发出终止支持警告之前，没有任何人查过支持日历。
 
-That is a worse defect than it first appears in a repository whose entire pitch is
-"production-shaped":
+对于一个整体卖点是"贴近生产形态（production-shaped）"的仓库来说，这个缺陷比乍看起来更严重：
 
-- **No security patches.** After OSS end-of-life, CVEs in that line are fixed only for commercial
-  Enterprise subscribers. An unsupported framework is a standing vulnerability, not a stylistic
-  preference.
-- **It undermines everything else.** A reviewer who reads ADR-0004's careful analysis of Redlock's
-  failure modes and then finds a framework a year past end-of-life in `pom.xml` will reasonably
-  conclude the rigor is selective.
+- **没有安全补丁。**OSS 生命周期结束之后，该线的 CVE 只为付费的 Enterprise 订阅者修复。一个不再受支持的框架是一个持续存在的漏洞，而不是风格偏好。
+- **它削弱其他一切。**一位评审者读完了 ADR-0004 对 Redlock 失效模式的细致分析，却在 `pom.xml` 里发现一个已过期一年的框架，他自然会得出结论：这里的严谨是有选择性的。
 
-## Decision
+## 决策
 
-1. **Upgrade to Spring Boot 4.1.1**, the current GA release. Spring's guidance for anyone on 3.x is
-   to move to 4.0.x or 4.1.x to keep receiving OSS support.
-2. **Verify version currency at the point of pinning**, not from memory. Dependency versions are the
-   category of fact most likely to be stale; the check costs one lookup.
-3. **Track Boot's tested versions for the libraries it knows about.** `testcontainers.version` mirrors
-   the property in `spring-boot-dependencies` rather than being chosen independently — pinning it
-   separately is how you end up debugging a combination nobody ships.
-4. **Java stays at 21 for now.** Boot 4 keeps Java 17 as its baseline, so 21 is fully supported. Java
-   25 is a separate, worthwhile change discussed below.
+1. **升级到 Spring Boot 4.1.1**，即当前的 GA 版本。Spring 对所有仍停留在 3.x 的人给出的指引是迁移到 4.0.x 或 4.1.x，以继续获得 OSS 支持。
+2. **在固定版本的那一刻核实其时效性**，而不是凭记忆。依赖版本是最容易过时的一类事实；这个检查只花一次查询。
+3. **对 Boot 已知悉的库，跟随它测试过的版本。**`testcontainers.version` 与 `spring-boot-dependencies` 中的属性保持一致，而不是独立挑选——单独固定它，正是你最后要调试一个无人发布的组合的原因。
+4. **Java 目前保持在 21。**Boot 4 仍以 Java 17 为基线，因此 21 完全受支持。Java 25 是另一个值得做的独立变更，下文讨论。
 
-## What the upgrade actually required
+## 这次升级实际需要做什么
 
-Four changes, all mechanical once found:
+四处改动，一旦找到就都是机械性的：
 
-| Change | Detail |
+| 改动 | 细节 |
 |---|---|
 | `spring-boot.version` | `3.3.5` → `4.1.1` |
-| Jackson 2 → 3 | Boot 4 ships Jackson 3.1.5. The package moved from `com.fasterxml.jackson` to `tools.jackson`; two imports changed |
-| Testcontainers 1.x → 2.0.5 | The JUnit 5 artifact was renamed `junit-jupiter` → `testcontainers-junit-jupiter` |
-| Testcontainers BOM | Boot 4 defines `testcontainers.version` but no longer imports the BOM, so the import must be explicit |
+| Jackson 2 → 3 | Boot 4 自带 Jackson 3.1.5。包从 `com.fasterxml.jackson` 移到了 `tools.jackson`；有两处 import 需要修改 |
+| Testcontainers 1.x → 2.0.5 | JUnit 5 构件（artifact）由 `junit-jupiter` 改名为 `testcontainers-junit-jupiter` |
+| Testcontainers BOM | Boot 4 定义了 `testcontainers.version` 但不再导入该 BOM，因此必须显式导入 |
 
-The Jackson change is the one worth noting: it is a **runtime** concern that compiles cleanly either
-way once imports are fixed, so the compiler is not the safety net. Deserialization of every driver
-GPS frame goes through it, and correctness was confirmed by driving real WebSocket connections and
-checking that frames still land in the geospatial index — not by the build passing.
+Jackson 这处改动最值得注意：它是一个**运行时**问题，一旦 import 修好，两种写法都能干净地编译通过，所以编译器并不是安全网。每个司机 GPS 帧的反序列化都要经过它，正确性是通过驱动真实的 WebSocket 连接并确认帧仍然落入地理空间索引来确认的——而不是靠构建通过。
 
-**A rule that silently stopped working:** `ArchitectureTest` forbids the domain module from depending
-on `com.fasterxml.jackson..`. Under Jackson 3 that package no longer exists, so the rule would have
-kept passing while the hole it guards — a Jackson annotation creeping into a domain record — was wide
-open. The rule now bans both package roots. This is the characteristic failure of guard rails: they
-do not announce that they have stopped guarding anything.
+**一条悄悄失效的规则：**`ArchitectureTest` 禁止领域（domain）模块依赖 `com.fasterxml.jackson..`。在 Jackson 3 之下这个包已不存在，于是这条规则会一直通过，而它所守卫的那个口子——Jackson 注解悄悄溜进领域记录——却完全敞开。这条规则现在同时封禁两个包根。这正是护栏的典型失效方式：它们不会宣告自己已经不再守护任何东西。
 
-## Consequences
+## 后果
 
-**Positive**
+**正面**
 
-- Back on a supported line receiving security patches.
-- Newer Spring Framework 7, Tomcat 11, Hibernate 7.1 underneath.
-- One fewer contradiction between what the README claims and what the build does.
+- 回到了仍在接收安全补丁的受支持版本线上。
+- 底层换成了更新的 Spring Framework 7、Tomcat 11、Hibernate 7.1。
+- README 的宣称与构建的实际行为之间少了一处矛盾。
 
-**Negative**
+**负面**
 
-- Jackson 3 is a genuine ecosystem split. Any future library expecting Jackson 2 needs the deprecated
-  compatibility layer or replacing.
-- Boot 4 removed public members from auto-configuration classes and renamed several properties
-  (`management.tracing.enabled` → `management.tracing.export.enabled` among them). None affected this
-  codebase today, but they will constrain later phases.
-- Testcontainers 2.x is a major version whose full API surface has not been exercised here — only the
-  parts `RedisDriverLocationIndexIT` uses.
+- Jackson 3 是一次真实的生态分裂。今后任何期待 Jackson 2 的库都需要已废弃的兼容层，或者被替换掉。
+- Boot 4 移除了自动配置类上的 public 成员，并改了若干属性名（`management.tracing.enabled` → `management.tracing.export.enabled` 就是其中之一）。这些目前都没有影响本代码库，但会在后续阶段形成约束。
+- Testcontainers 2.x 是一个大版本，其完整 API 面并没有在这里被用到——只用了 `RedisDriverLocationIndexIT` 用到的那部分。
 
-## Java 25: done, and why it was worth it
+## Java 25：已经完成，以及为什么值得
 
-The runtime moved from Java 21 to **Java 25 LTS** (25.0.4.1) in the same pass.
+运行时在同一轮改动中从 Java 21 迁移到了 **Java 25 LTS**（25.0.4.1）。
 
-The reason is specific rather than cosmetic. **JDK 24 shipped [JEP 491](https://openjdk.org/jeps/491),
-which removed virtual-thread pinning on `synchronized` blocks.** Under Java 21, a virtual thread that
-blocks inside `synchronized` holds its carrier hostage. [ADR-0006](0006-java21-virtual-threads.md)
-mitigated this by mandating `ReentrantLock` — but that only covers code *we* write. The risk lives in
-libraries we do not control: the Redis client, the JDBC driver arriving in Phase 4, the logging
-framework that runs on every request path.
+理由是具体的，而不是为了好看。**JDK 24 带来了 [JEP 491](https://openjdk.org/jeps/491)，它移除了 `synchronized` 块上的虚拟线程固定问题。**在 Java 21 下，一个在 `synchronized` 内阻塞的虚拟线程会把它的载体线程劫为人质。[ADR-0006](0006-java21-virtual-threads.md) 通过强制使用 `ReentrantLock` 来缓解——但这只覆盖*我们*自己写的代码。风险存在于我们无法控制的库中：Redis 客户端、Phase 4 才引入的 JDBC 驱动，以及运行在每条请求路径上的日志框架。
 
-The arithmetic is what makes it serious here. Carrier threads come from a ForkJoinPool sized to CPU
-count, and the dev VM has **4 vCPUs**. Two pinned carriers is half the scheduler gone — a throughput
-cliff that appears only under concurrency, i.e. precisely during the Phase 8 load test.
+让它在这里变得严重的是那笔算术。载体线程来自一个按 CPU 数量定容的 ForkJoinPool，而开发虚拟机只有 **4 个 vCPU**。两个被固定的载体就意味着调度器少了一半——这种吞吐量悬崖只在并发下出现，也就是恰好出现在 Phase 8 负载测试期间。
 
-**Measured, not assumed.** Eight virtual threads, each blocking 300ms inside `synchronized` on eight
-*different* locks (so nothing is genuinely contended), with the scheduler restricted to one carrier:
+**实测，而非假设。**八个虚拟线程，各自在 `synchronized` 内对八把*互不相同*的锁阻塞 300ms（因此并没有真正的锁竞争），并把调度器限制为只有一个载体线程：
 
-| Runtime | Elapsed | Verdict |
+| 运行时 | 耗时 | 结论 |
 |---|---|---|
-| JDK 21.0.12.1 | **2431 ms** | Pinned — carrier held, tasks fully serialised (2400 ms is the serial floor) |
-| JDK 25.0.4.1 | **308 ms** | Not pinned — carrier released, tasks overlapped |
+| JDK 21.0.12.1 | **2431 ms** | 被固定——载体被占住，任务完全串行（2400 ms 是串行下限） |
+| JDK 25.0.4.1 | **308 ms** | 未被固定——载体被释放，任务相互重叠 |
 
-A 7.9× difference on work that should have been perfectly parallel.
+在一本应完全并行的工作上相差 7.9 倍。
 
-### Bytecode target deliberately stays at 21
+### 字节码目标刻意保持在 21
 
-`maven.compiler.release` remains `21` while the build runs on JDK 25. JEP 491 is a **JVM runtime**
-behaviour, not a bytecode feature, so the entire benefit lands without emitting class-file version 69
-— which ArchUnit 1.3.0 and other bytecode readers would have to be upgraded to parse. Raising the
-language level is a separate decision to be taken on the merits of the language features, not
-smuggled in as a side effect of a runtime upgrade.
+构建运行在 JDK 25 上，但 `maven.compiler.release` 仍然是 `21`。JEP 491 是一种 **JVM 运行时**行为，而不是字节码特性，因此全部收益都能拿到，而不必产出 class 文件版本 69——否则 ArchUnit 1.3.0 和其他字节码读取器也得跟着升级才能解析。是否提高语言级别，是一个要依据语言特性本身价值单独做出的决策，而不是作为运行时升级的副作用悄悄夹带进来。
 
-### Consequence
+### 后果
 
-`-Djdk.tracePinnedThreads` is now inert (the JEP explicitly retires it), so it has been removed from
-the load-test JVM flags in [LOAD_TESTING.md](../LOAD_TESTING.md). ADR-0006's pinning caveat is
-resolved rather than managed — the discipline of preferring `ReentrantLock` remains good practice,
-but it is no longer load-bearing.
+`-Djdk.tracePinnedThreads` 现在已经失效（该 JEP 明确将其退役），因此已从 [LOAD_TESTING.md](../LOAD_TESTING.md) 的负载测试 JVM 参数中移除。ADR-0006 的固定告警是得到了解决，而不再只是被管理——优先使用 `ReentrantLock` 的纪律仍然是好实践，但它不再是承重墙。
 
-## Verification
+## 验证
 
-`mvn clean verify` — 82 tests green, including the 8 Testcontainers-backed Redis integration tests.
-Beyond the suite, the location service was run against live Redis and driven with 20 concurrent
-WebSocket connections: 840 frames accepted, 800 correctly throttled, 0 rejected, 20 drivers indexed,
-and `GEOSEARCH` still ranking by distance.
+`mvn clean verify`——82 个测试全部通过，其中包括 8 个由 Testcontainers 支撑的 Redis 集成测试。除了测试套件之外，位置服务还对接真实 Redis 运行，并用 20 个并发 WebSocket 连接进行了驱动：接受 840 帧，正确限流 800 帧，拒绝 0 帧，索引了 20 个司机，且 `GEOSEARCH` 仍然按距离排序。

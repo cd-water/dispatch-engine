@@ -10,13 +10,11 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * An in-memory claim store that keeps the one rule the real one has: a release only succeeds
- * if the caller's token still owns the claim.
+ * 内存中的认领存储，保留了真实实现的那条规则：只有调用方的令牌仍拥有认领时，释放才会成功。
  *
- * <p>Written by hand rather than mocked. A mock would let a test assert that {@code release}
- * was called, which is not the property that matters — the property is that the driver ends up
- * back in the pool. Modelling the token check here means a test can assert on the resulting
- * state, and a release with the wrong token fails in the test exactly as it would in Redis.
+ * <p>手写而非 mock。mock 会让测试只能断言 {@code release} 被调用过，而那并不是关键性质——
+ * 关键性质是司机最终回到了池中。在这里建模令牌检查，意味着测试可以断言最终状态，而用错误
+ * 令牌的释放会像在 Redis 里一样在测试中失败。
  */
 class FakeClaimStore implements DriverClaimStore {
 
@@ -27,21 +25,21 @@ class FakeClaimStore implements DriverClaimStore {
 
     private RuntimeException failure;
 
-    /** Puts a driver in the index as claimable. */
+    /** 在索引中把司机置为可认领。 */
     void available(DriverId driverId) {
         statuses.put(driverId, "AVAILABLE");
         claims.remove(driverId);
         pinned.remove(driverId);
     }
 
-    /** Puts a driver in the state the matching engine leaves them in after winning a claim. */
+    /** 把司机置于匹配引擎赢得认领后留下的状态。 */
     void reserved(DriverId driverId, String offerToken) {
         statuses.put(driverId, "RESERVED");
         claims.put(driverId, offerToken);
         pinned.put(driverId, false);
     }
 
-    /** Makes every subsequent call throw, standing in for Redis being unreachable. */
+    /** 让之后每次调用都抛异常，模拟 Redis 不可达。 */
     void failWith(RuntimeException e) {
         this.failure = e;
     }
@@ -68,7 +66,7 @@ class FakeClaimStore implements DriverClaimStore {
     @Override
     public boolean release(DriverId driverId, String offerToken) {
         raiseIfFailing();
-        // The token check, which is the whole reason release is a script in the real store.
+        // 令牌检查，这正是真实存储里释放必须写成脚本的全部原因。
         if (!offerToken.equals(claims.get(driverId))) {
             return false;
         }

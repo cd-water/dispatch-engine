@@ -3,14 +3,14 @@ package com.ridematching.domain.trip;
 import java.util.UUID;
 
 /**
- * Identifier for a single ride request and the trip it becomes.
+ * 单次叫车请求及其随后形成的行程的标识符。
  *
- * <p>Wrapped rather than passed as a bare {@code UUID} so the compiler rejects the
- * classic mix-up of handing a rider id where a ride id is expected — a bug that is
- * invisible at a call site taking three UUIDs in a row.
+ * <p>选择包装而不是直接传递裸的 {@code UUID}，这样当在期望 ride id 的地方传入乘客 id 时，
+ * 编译器能拒绝这种经典混淆——在一个连续接收三个 UUID 的调用点上，
+ * 这类 bug 是不可见的。
  *
- * <p>Doubles as the Kafka partition key for every ride event, which is what guarantees
- * {@code requested -> matched -> completed} can never be observed out of order (ADR-0003).
+ * <p>它同时充当每一条 ride 事件的 Kafka 分区键，这正是保证
+ * {@code requested -> matched -> completed} 永远不会被乱序观察到的原因（ADR-0003）。
  */
 public record RideId(UUID value) {
 

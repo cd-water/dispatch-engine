@@ -1,18 +1,14 @@
-# ADR-0001: Hexagonal architecture in a multi-module Maven build
+# ADR-0001：多模块 Maven 构建中的六边形架构（hexagonal architecture）
 
-**Status:** Accepted · **Date:** 2026-09-03
+**状态：** 已采纳 · **日期：** 2026-09-03
 
-## Context
+## 背景
 
-The system has six deployable services sharing a domain model, and it must be testable without
-Redis, Kafka, or Postgres running. The two common failure modes for a project like this are (a) a
-single Spring package where domain logic is tangled with `@Entity` and `@KafkaListener` annotations,
-and (b) premature microservice sprawl where each service has its own repo, build, and drift.
+系统有六个可部署的服务共享同一个领域模型（domain），并且必须能在 Redis、Kafka、Postgres 都未运行的情况下完成测试。这类项目有两种常见的失败模式：（a）把所有东西塞进一个 Spring 包，领域逻辑与 `@Entity`、`@KafkaListener` 注解纠缠在一起；（b）过早地微服务蔓延，每个服务都有自己独立的仓库、构建和漂移。
 
-## Decision
+## 决策
 
-A **multi-module Maven build** containing independently deployable Spring Boot services, with each
-service internally structured as **ports and adapters**:
+采用**多模块 Maven 构建**，其中包含可独立部署的 Spring Boot 服务，且每个服务内部按**端口与适配器（ports and adapters）**组织：
 
 ```
 domain/        entities, value objects, invariants     — zero framework imports
@@ -21,31 +17,22 @@ adapters/in/   REST controllers, WS handlers, Kafka consumers
 adapters/out/  Redis, Postgres, Kafka producer implementations
 ```
 
-The dependency rule points inward: `adapters → application → domain`. The domain module has no
-Spring, no Jackson, no JPA on its classpath — enforced in CI by ArchUnit, not by discipline.
+依赖规则指向内部：`adapters → application → domain`。领域模块的 classpath 上没有 Spring、没有 Jackson、没有 JPA——这由 CI 中的 ArchUnit 强制执行，而不是靠自觉。
 
-## Consequences
+## 后果
 
-**Positive**
+**正面**
 
-- `TripStateMachine`, driver scoring, and claim-decision logic are plain-Java unit tests that run in
-  milliseconds. The slow Testcontainers suite only covers adapters.
-- Swapping Redis GEO for PostGIS is an adapter change behind `DriverLocationIndex`, not a rewrite —
-  which also makes it possible to *benchmark* both implementations against the same port.
-- One `mvn verify` builds and tests everything; no cross-repo version coordination.
+- `TripStateMachine`、司机打分和认领决策逻辑都是毫秒级跑完的纯 Java 单元测试。缓慢的 Testcontainers 套件只覆盖适配器。
+- 把 Redis GEO 换成 PostGIS 只是 `DriverLocationIndex` 背后的适配器改动，而不是重写——这也让针对同一个端口（port）*对比评测*两套实现成为可能。
+- 一条 `mvn verify` 构建并测试全部内容；无需跨仓库的版本协调。
 
-**Negative**
+**负面**
 
-- More packages and interfaces than a flat layout; genuine overhead on a small codebase, accepted
-  because demonstrating boundary discipline is part of the point of this project.
-- Shared `libs/domain` creates coupling between services. Mitigated by keeping it strictly to pure
-  model types with no infrastructure concerns, and by versioning event schemas separately in
-  `libs/events`.
+- 相比扁平布局，包和接口更多；对小型代码库而言是真实的开销，之所以接受，是因为展示边界纪律本身就是本项目的一部分。
+- 共享的 `libs/domain` 在服务之间制造了耦合。缓解手段是严格限制它只包含与基础设施无关的纯模型类型，并在 `libs/events` 中单独对事件 schema 做版本管理。
 
-## Alternatives considered
+## 考虑过的备选方案
 
-- **Single Spring Boot monolith.** Simplest to build, but the Kafka decoupling story becomes a
-  fiction — you cannot demonstrate that killing the notification consumer leaves matching unaffected
-  if they share a process.
-- **Separate repositories per service.** Realistic at company scale, hostile to a reviewer who wants
-  to read the system in one place.
+- **单个 Spring Boot 单体。** 构建最简单，但 Kafka 解耦的故事就成了一句空话——如果通知消费者与匹配共享同一个进程，你就无法演示"杀掉通知消费者不影响匹配"。
+- **每个服务独立仓库。** 在公司规模下是现实做法，但对想在一处读完整个系统的评审者并不友好。

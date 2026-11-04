@@ -15,17 +15,15 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Drains the outbox to Kafka (ADR-0003).
+ * 将发件箱（outbox）中的事件排空到 Kafka（ADR-0003）。
  *
- * <p>Runs on a short interval rather than reacting to commits. Debezium change-data-capture
- * would remove the polling latency, at the cost of running Debezium; for a system whose
- * matching SLA is 500ms, a 200ms poll is comfortably inside budget and vastly simpler.
+ * <p>以较短的时间间隔轮询运行，而不是对事务提交做出反应。Debezium 变更数据捕获（CDC）
+ * 可以消除轮询延迟，代价是要额外运维 Debezium；对于一个匹配 SLA 为 500ms 的系统而言，
+ * 200ms 的轮询完全在预算之内，而且简单得多。
  *
- * <p><strong>At-least-once, deliberately.</strong> A row is marked published only after Kafka
- * acknowledges it. If the process dies between the send and the mark, the event is sent again
- * on the next pass — which is exactly why every consumer dedupes on {@code eventId}. The
- * alternative ordering, marking first, would lose events on the same crash, and a lost event
- * is unrecoverable where a duplicate is merely inconvenient.
+ * <p><strong>刻意选择至少一次（at-least-once）。</strong>只有当 Kafka 确认之后，才会把该行标记为已发布。
+ * 如果进程在发送与标记之间崩溃，事件会在下一轮再次发送——这正是每个消费者都按 {@code eventId}
+ * 去重的原因。反过来先标记的顺序在同样的崩溃下会丢失事件，而丢失事件无法恢复，重复只是麻烦一点。
  */
 public class OutboxPublisher {
 
@@ -59,16 +57,14 @@ public class OutboxPublisher {
     }
 
     /**
-     * Registers the backlog gauge after construction completes.
+     * 在构造完成后注册积压（backlog）仪表。
      *
-     * <p>Not in the constructor: handing {@code this} to a registry from inside a constructor
-     * publishes a half-initialised object, which javac flags as a possible 'this' escape.
-     * Marking the class final would also silence that — and did, until the resulting inability
-     * to create a CGLIB proxy broke {@code @Transactional} on {@link #publishBatch()}.
+     * <p>不放在构造函数里：在构造函数内部把 {@code this} 交给注册器，等于发布了一个尚未初始化完整的对象，
+     * javac 会将其标记为可能的 'this' 逃逸。把类标记为 final 也能消除这个告警——曾经也确实这么做过，
+     * 但由此无法创建 CGLIB 代理，进而破坏了 {@link #publishBatch()} 上的 {@code @Transactional}。
      *
-     * <p>Backlog depth is the health signal that matters here: a growing outbox means Kafka is
-     * unreachable or the publisher has stalled, and it shows up long before anyone notices
-     * missing notifications.
+     * <p>积压深度是这里最关键的健康信号：发件箱持续增长意味着 Kafka 不可达或发布器已停滞，
+     * 它远早于有人发现通知缺失之前就会暴露出来。
      */
     @jakarta.annotation.PostConstruct
     void registerMetrics() {
@@ -78,11 +74,10 @@ public class OutboxPublisher {
     }
 
     /**
-     * Publishes one batch. Returns how many events were sent.
+     * 发布一个批次。返回已发送的事件数量。
      *
-     * <p>{@code FOR UPDATE SKIP LOCKED} lets several instances drain the same outbox
-     * concurrently without any of them blocking on rows another instance already took. Without
-     * SKIP LOCKED, a second publisher would serialise behind the first and add nothing.
+     * <p>{@code FOR UPDATE SKIP LOCKED} 让多个实例可以并发地排空同一个发件箱，而不会在别的实例
+     * 已经取走的行上阻塞。没有 SKIP LOCKED，第二个发布器只能串行排在第一个之后，毫无增益。
      */
     @Transactional
     public int publishBatch() {
@@ -110,23 +105,22 @@ public class OutboxPublisher {
         int sent = 0;
         for (OutboxRow row : batch) {
             try {
-                // Block on the ack: marking a row published before Kafka confirms it would be
-                // exactly the dual-write bug the outbox exists to remove, moved one step later.
+                // 阻塞等待确认：在 Kafka 确认之前就把该行标记为已发布，
+                // 正是发件箱本来要消除的双重写入（dual-write）缺陷，只是被往后挪了一步。
                 kafka.send(row.topic(), row.partitionKey(), row.payload()).get();
                 markPublished(row.id());
                 published.increment();
                 sent++;
             } catch (InterruptedException e) {
-                // Restore the flag only for a genuine interrupt, and stop immediately —
-                // swallowing it would leave the thread unable to be shut down.
+                // 只有在真正的中断时才恢复标志位，并立即停止——
+                // 吞掉中断会让该线程再也无法被关闭。
                 Thread.currentThread().interrupt();
                 failed.increment();
                 break;
             } catch (Exception e) {
                 failed.increment();
-                // Left unpublished on purpose: the next pass retries it. Ordering within a
-                // partition is preserved because we stop at the first failure rather than
-                // skipping ahead — publishing row N+1 after N failed would reorder the stream.
+                // 刻意保持未发布状态：下一轮会重试。分区内的顺序得以保留，因为我们在第一次失败时就停止，
+                // 而不是跳过去继续——在第 N 行失败后发布第 N+1 行会打乱事件流的顺序。
                 log.warn("Outbox row {} failed to publish, will retry: {}", row.id(), e.toString());
                 break;
             }
@@ -141,7 +135,7 @@ public class OutboxPublisher {
                 .update();
     }
 
-    /** Unpublished rows waiting to be drained. */
+    /** 尚未发布、等待被排空的行。 */
     public double backlogDepth() {
         Integer depth = jdbc.sql("SELECT count(*) FROM outbox WHERE published_at IS NULL")
                 .query(Integer.class).single();

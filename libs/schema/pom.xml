@@ -16,19 +16,18 @@
   <description>Flyway migrations for the shared PostgreSQL database.</description>
 
   <!--
-    Resources only: no Java, no dependencies.
+    只有资源：没有 Java，没有依赖。
 
-    These migrations began in dispatch-api because it was the only service touching
-    PostgreSQL. trip-service now owns the trip lifecycle and writes the same tables, and a
-    schema that lives inside one of its two consumers is a schema one of them can change
-    without the other noticing. Moving it here makes the database what it actually is —
-    shared infrastructure that neither service owns alone — and gives both the identical
-    migration set on the classpath.
+    这些迁移最初放在 dispatch-api 中，因为它是唯一触碰 PostgreSQL 的服务。
+    trip-service 现在拥有行程生命周期并写入同样的表，而一个只存在于两个
+    使用方之一的 schema，就是其中一个可以在另一个毫无察觉的情况下改动的
+    schema。把它移到这里，让数据库回归它本来的样子 —— 双方都不单独拥有的
+    共享基础设施 —— 并让两者在 classpath 上拥有完全相同的迁移集合。
 
-    BOTH services run Flyway against it at startup, which is safe because they run the SAME
-    migrations: Flyway takes a PostgreSQL advisory lock before migrating, so a concurrent
-    starter waits rather than racing, and whichever arrives second finds the history table
-    already current and does nothing. The failure mode worth avoiding was never concurrency;
-    it was two services holding two different ideas of what the schema is.
+    两个服务都会在启动时对它运行 Flyway，这是安全的，因为它们运行的是同一批
+    迁移：Flyway 在迁移之前会获取一个 PostgreSQL advisory lock，因此并发的
+    启动方会等待而不是竞争，而后到的那个会发现历史表已经是最新的，于是
+    什么都不做。值得避免的故障模式从来不是并发；而是两个服务对 schema
+    究竟是什么各持两种不同的理解。
   -->
 </project>

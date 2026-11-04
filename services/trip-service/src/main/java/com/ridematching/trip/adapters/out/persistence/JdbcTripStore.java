@@ -27,12 +27,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * PostgreSQL persistence for the trip lifecycle.
+ * 行程生命周期的 PostgreSQL 持久化。
  *
- * <p>Hand-mapped rather than JPA, for the same reason the rest of the system is: the SQL that
- * carries the concurrency guarantee should be readable, not generated. Nothing here is
- * incidental — the {@code WHERE version} clause and the {@code DuplicateKeyException} branch
- * are both load-bearing.
+ * <p>手工映射而非 JPA，原因与系统其余部分一致：承载并发保证的 SQL 应当可读，而不是被生成。
+ * 这里没有任何东西是可有可无的——{@code WHERE version} 子句和 {@code DuplicateKeyException}
+ * 分支都是承重结构。
  */
 public class JdbcTripStore implements TripStore {
 
@@ -88,29 +87,27 @@ public class JdbcTripStore implements TripStore {
                     .param("expectedVersion", expectedVersion)
                     .update();
         } catch (DuplicateKeyException e) {
-            // uniq_driver_active_trip: another trip already holds this driver. The ADR-0004
-            // guarantee firing, and the only place in this service where it can.
+            // uniq_driver_active_trip：另一趟行程已经持有这个司机。这是 ADR-0004 的保证在
+            // 生效，也是本服务中唯一可能发生的地方。
             throw new DriverAlreadyAssignedException(
                     "Driver %s already holds an active trip".formatted(state.driverId()), e);
         }
 
         if (updated == 0) {
-            // Zero rows means the version moved, not that the trip vanished: the caller read
-            // it moments ago inside this same use case. Distinguishing the two with an extra
-            // SELECT would buy a better error message and a second round trip on the contended
-            // path, which is the wrong trade.
+            // 更新零行意味着版本号被改动了，而不是行程消失了：调用方刚刚在同一个用例里读过
+            // 它。用额外一次 SELECT 来区分两者，只会换来更好的错误信息和在争用路径上的第二
+            // 次往返，这是一笔不划算的交换。
             throw new ConcurrentTripModificationException(state.id(), expectedVersion);
         }
 
-        // Only transitions made since the trip was rehydrated. Trip.rehydrate deliberately
-        // does not restore history, so this appends the new entries rather than re-inserting
-        // the whole audit trail on every state change.
+        // 只处理自行程重建以来发生的转换。Trip.rehydrate 有意不恢复历史，因此这里追加新
+        // 的条目，而不是在每次状态变更时重新插入整条审计追踪。
         for (TripTransition transition : trip.history()) {
             insertEvent(state.id(), transition);
         }
 
         if (event != null) {
-            // Same transaction as the state change. That is the whole point (ADR-0003).
+            // 与状态变更处于同一事务。这正是全部意义所在（ADR-0003）。
             outbox.append(event);
         }
     }
@@ -135,10 +132,9 @@ public class JdbcTripStore implements TripStore {
     private static TripSnapshot toSnapshot(ResultSet rs) throws SQLException {
         UUID driverId = rs.getObject("driver_id", UUID.class);
 
-        // getLong returns 0 for SQL NULL, and 0 is not a valid fence token — the domain
-        // rejects it. wasNull() is the only way to tell the two apart, and it reports on the
-        // most recent read, so it has to be consumed here rather than further down among the
-        // constructor arguments where a later column would have overwritten the answer.
+        // 对 SQL NULL，getLong 返回 0，而 0 不是合法的围栏令牌——领域层会拒绝它。wasNull()
+        // 是区分两者的唯一办法，且它报告的是最近一次读取，因此必须在这里消费，而不能放到
+        // 下面构造参数中间——那里后面的列会覆盖掉答案。
         long fence = rs.getLong("fence_token");
         Long fenceToken = rs.wasNull() ? null : fence;
 

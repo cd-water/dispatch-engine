@@ -14,12 +14,11 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * In-memory {@link TripStore} that enforces the version check.
+ * 内存中的 {@link TripStore}，强制执行版本检查。
  *
- * <p>Stores snapshots rather than aggregates, so every {@code load} rehydrates exactly as the
- * JDBC adapter does. A fake that handed back the same mutable object would hide the
- * possibility that a field is lost on the round trip — which is the specific bug this shape
- * of test is worth having.
+ * <p>存快照而不是聚合，所以每次 {@code load} 都像 JDBC 适配器一样精确地重建。一个返回同一个
+ * 可变对象的 fake 会掩盖"某个字段在往返中丢失"的可能性——而这正是这种形态的测试值得存在的
+ * 那个具体 bug。
  */
 class FakeTripStore implements TripStore {
 
@@ -39,12 +38,10 @@ class FakeTripStore implements TripStore {
     }
 
     /**
-     * Makes another writer commit in the gap between the next load and its save.
+     * 让另一个写入者在下一次加载与其保存之间的间隙里提交。
      *
-     * <p>Bumping the version up front would not reproduce anything: the caller would simply
-     * read the new version and write against it successfully. The lost update this guards
-     * against only exists in the window after a read, so that is where the interference has
-     * to happen.
+     * <p>提前上调版本号什么也复现不了：调用方只会读到新版本并成功地写入。这里防范的丢失更新
+     * 只存在于读取之后的窗口里，所以干扰必须发生在那时。
      */
     void bumpVersionAfterNextLoad(RideId rideId) {
         bumpAfterLoad = rideId;

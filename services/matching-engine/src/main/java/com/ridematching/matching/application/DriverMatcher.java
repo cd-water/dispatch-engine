@@ -13,12 +13,11 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Turns a ride request into a claimed driver (ADR-0004).
+ * 把一条叫车请求变成一次司机认领（ADR-0004）。
  *
- * <p>Search an expanding radius, rank the candidates, and claim them in order until one
- * sticks. The loop is the important part: losing a claim is <strong>expected</strong> under
- * load, and the correct response is to move to the next candidate, never to retry the same
- * driver. Retrying a contended driver is how a hot pickup point turns into a queue.
+ * <p>按扩展的半径搜索，对候选排序，然后依次认领，直到有一个成功。循环才是重点：在负载下
+ * 认领失败是<strong>预期之内</strong>的，正确的反应是转向下一个候选，绝不重试同一个司机。
+ * 重试一个正在被争抢的司机，正是把一个热门上车点变成队列的方式。
  */
 public class DriverMatcher {
 
@@ -43,8 +42,8 @@ public class DriverMatcher {
                 .description("Requests that ended with a claimed driver").register(meters);
         this.unmatched = Counter.builder("matching.unmatched")
                 .description("Requests that exhausted the radius without a driver").register(meters);
-        // The metric that makes contention observable rather than a mystery. A load test
-        // where this stays zero has not actually exercised the race (LOAD_TESTING.md, S3).
+        // 让争用可观察而不是成谜的指标。这个值始终为零的负载测试，其实并没有真正触发
+        // 竞争（LOAD_TESTING.md，S3）。
         this.contention = Counter.builder("driver.claim.contention")
                 .description("Claims lost to another worker").register(meters);
         this.duration = Timer.builder("matching.duration")
@@ -52,10 +51,10 @@ public class DriverMatcher {
     }
 
     /**
-     * Finds and claims the best available driver for {@code pickup}.
+     * 为 {@code pickup} 找到并认领最合适的可用司机。
      *
-     * @param offerToken opaque token identifying this offer; used to release or confirm later
-     * @return the claimed driver and its fence token, or empty if none could be claimed
+     * @param offerToken 标识这次报价的不透明令牌；之后用于释放或确认
+     * @return 被认领的司机及其围栏令牌；若一个都认领不到则为空
      */
     public Optional<MatchedDriver> match(Coordinates pickup, String offerToken) {
         return duration.record(() -> attemptMatch(pickup, offerToken));
@@ -79,15 +78,15 @@ public class DriverMatcher {
                             offerToken));
                 }
 
-                // Someone else got there first. Counted, not logged as an error: under load
-                // this is the system working, not failing.
+                // 别人先到了。计入指标，而不是按错误记录：在负载下这是系统在正常工作，
+                // 而不是失败。
                 if (ClaimResult.ALREADY_CLAIMED.equals(claim.reason())
                         || ClaimResult.NOT_AVAILABLE.equals(claim.reason())) {
                     contention.increment();
                 }
             }
-            // Nothing claimable at this radius — widen rather than give up. A wider search is
-            // cheaper than telling a rider there are no drivers.
+            // 这个半径内没有可认领的司机——扩大范围而不是放弃。更宽的搜索比告诉乘客
+            // "没有司机"更便宜。
         }
 
         unmatched.increment();
@@ -95,25 +94,24 @@ public class DriverMatcher {
     }
 
     /**
-     * Orders candidates.
+     * 对候选排序。
      *
-     * <p>Currently nearest-first, which is what {@code GEOSEARCH} already returns, so this is
-     * a no-op pass-through that exists to hold the seam. The composite score from
-     * ARCHITECTURE.md — ETA, acceptance rate, heading, idle time — needs driver history the
-     * system does not yet collect, and inventing a score over data that does not exist would
-     * be worse than admitting the ranking is simple today.
+     * <p>目前是最先最近，而这正是 {@code GEOSEARCH} 已经返回的顺序，所以这里是一个空转的
+     * 直通实现，用来占住接缝。ARCHITECTURE.md 中的复合评分——ETA、接单率、朝向、空闲
+     * 时长——需要系统尚未采集的司机历史，而在不存在的数据上编造评分，比承认今天的排序很
+     * 简单更糟。
      */
     private List<NearbyDriver> rank(List<NearbyDriver> candidates) {
         return candidates;
     }
 
     /**
-     * A successfully claimed driver.
+     * 一位被成功认领的司机。
      *
-     * @param driverId       who was claimed
-     * @param fenceToken     monotonic token that must accompany the durable assignment write
-     * @param distanceMeters straight-line distance from the pickup point
-     * @param offerToken     token required to release or confirm this claim
+     * @param driverId       被认领的是谁
+     * @param fenceToken     必须随持久化指派写入一起提交的单调令牌
+     * @param distanceMeters 与上车点的直线距离
+     * @param offerToken     释放或确认这次认领所需的令牌
      */
     public record MatchedDriver(com.ridematching.domain.driver.DriverId driverId,
                                 long fenceToken,

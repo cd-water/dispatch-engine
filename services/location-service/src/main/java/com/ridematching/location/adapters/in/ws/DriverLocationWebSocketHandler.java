@@ -16,14 +16,13 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Terminates driver WebSocket connections and feeds frames into the ingest path.
+ * 终结司机的 WebSocket 连接，并把帧送入摄取路径。
  *
- * <p>One virtual thread per connection (ADR-0006), which is what makes 10,000 concurrent
- * sockets affordable: each is roughly 1 KB of heap rather than a 1 MB OS thread stack.
+ * <p>每个连接一个虚拟线程（ADR-0006），这正是 10,000 个并发套接字可负担的原因：每个约占
+ * 1 KB 堆内存，而不是 1 MB 的操作系统线程栈。
  *
- * <p>The driver id is taken from the session, established at handshake, and never from the
- * frame body. Trusting a self-declared id in the payload would let any connected client
- * overwrite any driver's position — including moving a competitor across town.
+ * <p>司机 id 取自会话（在握手时建立），绝不来自帧体。信任载荷中自报的 id，会让任何已连接的
+ * 客户端都能覆盖任何司机的位置——包括把竞争对手挪到城市的另一头。
  */
 public class DriverLocationWebSocketHandler extends TextWebSocketHandler {
 
@@ -60,8 +59,8 @@ public class DriverLocationWebSocketHandler extends TextWebSocketHandler {
         try {
             frame = objectMapper.readValue(message.getPayload(), LocationFrame.class);
         } catch (Exception e) {
-            // A malformed frame is a client bug, not a server error. Log at debug and keep
-            // the connection: one bad frame should not disconnect a moving vehicle.
+            // 格式错误的帧是客户端 bug，不是服务端错误。按 debug 记录并保持连接：
+            // 一帧坏数据不该让一辆行驶中的车辆掉线。
             log.debug("Malformed frame from driver {}: {}", driverId, e.getMessage());
             return;
         }
@@ -74,7 +73,7 @@ public class DriverLocationWebSocketHandler extends TextWebSocketHandler {
                     frame.speedKph(),
                     Instant.ofEpochMilli(frame.ts())));
         } catch (IllegalArgumentException e) {
-            // Out-of-range coordinates, heading or speed — rejected by the domain records.
+            // 坐标、朝向或速度越界——由领域记录拒绝。
             log.debug("Invalid frame from driver {}: {}", driverId, e.getMessage());
         }
     }

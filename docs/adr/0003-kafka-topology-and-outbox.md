@@ -1,68 +1,50 @@
-# ADR-0003: Kafka topology, at-least-once delivery, and the transactional outbox
+# ADR-0003：Kafka 拓扑、至少一次（at-least-once）投递与事务性发件箱（transactional outbox）
 
-**Status:** Accepted · **Date:** 2026-09-03
+**状态：** 已采纳 · **日期：** 2026-09-03
 
-## Context
+## 背景
 
-Matching, notification, and billing must be decoupled from the rider's request. The naive
-implementation — publish to Kafka inside the same method that writes to Postgres — contains a silent
-correctness bug: the two systems cannot commit atomically. Either
+匹配、通知和计费必须与乘客的请求解耦。最朴素的实现——在与写 Postgres 相同的方法里向 Kafka 发布消息——内含一个隐蔽的正确性缺陷：两个系统无法原子地一起提交。要么
 
-- publish first, DB write fails → a `ride.matched` event exists for a trip that does not, or
-- commit first, publish fails → the trip is matched but nobody is ever notified.
+- 先发布，DB 写入失败 → 存在一个 `ride.matched` 事件，但对应的行程并不存在；要么
+- 先提交，发布失败 → 行程已匹配，但永远没有人收到通知。
 
-Both are dual-write failures, and both are invisible until they happen in production.
+两者都是双写（dual-write）失败，而且在生产环境发生之前都不可见。
 
-## Decision
+## 决策
 
-1. **At-least-once delivery**, explicitly. Producers use `acks=all` with idempotent producer enabled;
-   consumers commit offsets *after* processing and are made idempotent by de-duplicating on event ID
-   (a `processed_events` table, or Redis `SET NX` with TTL for cheap consumers).
-2. **Transactional outbox** for every state-changing event. The trip row and the outbox row are
-   written in one local transaction; a poller drains unpublished outbox rows to Kafka and stamps
-   `published_at`.
-3. **Topic layout** keyed for ordering:
+1. **明确采用至少一次（at-least-once）投递。** 生产者使用 `acks=all` 并开启幂等生产者；消费者在处理*之后*才提交偏移量，并通过对事件 ID 去重（dedupe）实现幂等（idempotent）（一张 `processed_events` 表，或对廉价的消费者使用带 TTL 的 Redis `SET NX`）。
+2. **每个改变状态的事件都走事务性发件箱。** 行程行与发件箱行写在同一个本地事务里；由一个轮询器把未发布的发件箱行排空到 Kafka，并打上 `published_at` 标记。
+3. **主题（topic）布局**按键保证有序：
 
-| Topic | Key | Partitions | Retention | Producer acks |
+| 主题 | 键 | 分区数 | 保留期 | 生产者 acks |
 |---|---|---|---|---|
-| `driver.location.v1` | `driverId` | 12 | 1 h, lz4 | `1` (telemetry, may drop) |
+| `driver.location.v1` | `driverId` | 12 | 1 h, lz4 | `1`（遥测，可丢失） |
 | `ride.requested.v1` | `rideId` | 12 | 7 d | `all` |
 | `ride.matched.v1` | `rideId` | 12 | 7 d | `all` |
 | `ride.unmatched.v1` | `rideId` | 6 | 7 d | `all` |
 | `ride.completed.v1` | `rideId` | 12 | 7 d | `all` |
-| `*.dlt` | original key | 3 | 30 d | `all` |
+| `*.dlt` | 原始键 | 3 | 30 d | `all` |
 
-4. **Version in the topic name** (`.v1`). A breaking schema change is a new topic with a
-   dual-publishing window, not a coordinated big-bang deploy.
-5. **Dead-letter topics.** 3 retries with exponential backoff, then the record goes to `<topic>.dlt`
-   with the exception and stack trace in headers, and the consumer advances. One poison message
-   cannot stall a partition.
+4. **版本号放在主题名里**（`.v1`）。破坏性 schema 变更意味着一个新主题加一段双写过渡窗口，而不是一次需要各方协同的大爆炸式发布。
+5. **死信（dead letter）主题。** 按指数退避重试 3 次，之后该记录带着异常和堆栈信息进入 `<topic>.dlt` 的 header，消费者继续前进。一条毒消息（poison message）不可能卡住一个分区。
 
-## Rationale
+## 理由
 
-Keying by `rideId` guarantees all events for one ride land on one partition and are therefore
-strictly ordered — `requested → matched → completed` can never be observed out of order. Keying
-location by `driverId` gives the same guarantee per driver. Partition count (12) is set above the
-expected consumer instance count so the system can scale out without repartitioning.
+以 `rideId` 为键保证了同一次叫车请求（ride request）的所有事件落在同一个分区上，因此严格有序——`requested → matched → completed` 不可能被乱序观察到。位置事件以 `driverId` 为键，对每名司机给出同样的保证。分区数（12）设置在预期的消费者实例数之上，使系统无需重新分区即可横向扩展。
 
-**Exactly-once is not claimed.** Kafka transactions provide EOS only within Kafka
-(consume-transform-produce); the moment a consumer writes to Postgres or sends a push notification,
-the guarantee ends. Idempotent consumers over at-least-once delivery is the design that is actually
-correct end-to-end, and saying so is more valuable than an EOS badge that does not hold.
+**不声称恰好一次（exactly-once）。** Kafka 事务只在 Kafka 内部（消费-转换-生产）提供 EOS；一旦消费者写 Postgres 或发送推送通知，保证就结束了。在至少一次投递之上构建幂等消费者，才是端到端真正正确的设计；把这一点说清楚，比挂一个并不成立的 EOS 徽章更有价值。
 
-## Consequences
+## 后果
 
-**Positive**
+**正面**
 
-- No dual-write bug. The outbox makes "the trip is saved" and "the event will be published" the same
-  commit.
-- Notification and billing can be stopped, deployed, or crash without touching matching latency —
-  demonstrated explicitly in the load test by killing a consumer mid-run.
-- Consumer lag becomes the single clearest backpressure metric in the dashboard.
+- 没有双写缺陷。发件箱让"行程已保存"与"事件将被发布"成为同一次提交。
+- 通知和计费可以被停止、部署或崩溃，而不触及匹配延迟——在负载测试中通过在运行中途杀掉一个消费者来显式演示。
+- 消费者滞后（consumer lag）成为仪表盘上最清晰的一个背压指标。
 
-**Negative**
+**负面**
 
-- The outbox poller adds latency (poll interval, default 200 ms) between commit and publish. Debezium
-  CDC would remove it at the cost of significant operational complexity; not worth it here.
-- The outbox table needs periodic pruning of published rows.
-- Every consumer must carry de-duplication logic — real code that must be tested, not a config flag.
+- 发件箱轮询器在提交与发布之间引入延迟（轮询间隔，默认 200 ms）。Debezium 变更数据捕获（CDC）可以消除它，代价是显著的运维复杂度；在这里不值得。
+- 发件箱表需要定期清理已发布的行。
+- 每个消费者都必须携带去重逻辑——这是必须被测试的真实代码，不是一个配置开关。

@@ -26,9 +26,9 @@
   </modules>
 
   <!--
-    Inherited by every service. Anything a service does NOT share belongs in its own POM:
-    Lettuce in location-service, Spring Kafka in the consumers, JPA in trip-service.
-    Only put something here when all six genuinely need it.
+    由每个服务继承。服务之间不共享的内容应放进各自的 POM：
+    location-service 里的 Lettuce、消费方中的 Spring Kafka、trip-service 里的 JPA。
+    只有当六个服务都确实需要时才放到这里。
   -->
   <dependencies>
     <dependency>
@@ -39,8 +39,8 @@
       <groupId>com.ridematching</groupId>
       <artifactId>events</artifactId>
     </dependency>
-    <!-- Brings actuator, the Prometheus registry, and the shared observability
-         auto-configuration along with it. -->
+    <!-- 它会随之引入 actuator、Prometheus 注册表以及共享的可观测性
+         自动配置。 -->
     <dependency>
       <groupId>com.ridematching</groupId>
       <artifactId>platform</artifactId>
@@ -60,17 +60,17 @@
 
   <build>
     <plugins>
-      <!-- Every service is an executable jar. Declared once here rather than six times. -->
+      <!-- 每个服务都是可执行 jar。在这里声明一次，而不是重复写六次。 -->
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
         <configuration>
           <!--
-            Without a classifier, repackage REPLACES the plain jar with the fat jar. Failsafe
-            runs after package, so integration tests would then resolve classes from a jar
-            where they live under BOOT-INF/classes and fail with NoClassDefFoundError.
-            The classifier keeps the plain jar as the module artifact (what other modules and
-            the tests compile against) and publishes the runnable one as *-exec.jar.
+            不带 classifier 时，repackage 会用 fat jar 替换普通 jar。Failsafe
+            在 package 之后运行，于是集成测试会从一个把类放在 BOOT-INF/classes
+            下的 jar 里解析类，进而抛出 NoClassDefFoundError。
+            这个 classifier 让普通 jar 继续作为模块 artifact（其他模块和
+            测试所编译的对象），并把可运行的那个发布为 *-exec.jar。
           -->
           <classifier>exec</classifier>
         </configuration>

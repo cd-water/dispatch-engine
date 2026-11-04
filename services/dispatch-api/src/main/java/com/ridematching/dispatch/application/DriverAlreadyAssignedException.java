@@ -1,12 +1,11 @@
 package com.ridematching.dispatch.application;
 
 /**
- * Raised when {@code uniq_driver_active_trip} rejects a write — the ADR-0004 guarantee firing.
+ * 当 {@code uniq_driver_active_trip} 拒绝一次写入时抛出——即 ADR-0004 的保证在生效。
  *
- * <p>This is <strong>normal control flow</strong>, not an error: it means another worker won
- * the race for the same driver, and the caller should move to its next candidate. It is
- * counted rather than logged at ERROR, so a busy dispatch hour does not drown the log in
- * exceptions that represent the system working correctly.
+ * <p>这是<strong>正常的控制流</strong>，不是错误：它意味着另一个 worker 在同一个司机的竞争中
+ * 赢了，调用方应当转向下一个候选。它被计数而不是按 ERROR 记录，这样繁忙的派单小时不会让日志
+ * 被那些代表系统正常工作的异常淹没。
  */
 public class DriverAlreadyAssignedException extends RuntimeException {
 

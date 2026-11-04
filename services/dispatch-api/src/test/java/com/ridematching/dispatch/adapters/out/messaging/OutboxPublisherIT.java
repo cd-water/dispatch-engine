@@ -36,12 +36,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 /**
- * End-to-end proof of the transactional outbox (ADR-0003): a ride request commits a trip row
- * and an outbox row together, and the publisher drains it to a real Kafka broker.
+ * 事务性发件箱的端到端证明（ADR-0003）：一次叫车请求把行程行和发件箱行一起提交，然后由
+ * 发布者把它排空到真实的 Kafka broker。
  *
- * <p>Both containers are real because the properties under test are precisely the ones a fake
- * cannot have: that two writes share one transaction, and that a record actually lands on a
- * partition a separate consumer can read.
+ * <p>两个容器都是真实的，因为受测的性质恰恰是 fake 不可能具备的：两次写入共享同一个事务，
+ * 以及记录确实落到了另一个消费者可以读取的分区上。
  */
 @Testcontainers
 @EnabledIf("containerRuntimeAvailable")
@@ -56,9 +55,9 @@ class OutboxPublisherIT {
         }
     }
 
-    // @SuppressWarnings("resource") is required, not decorative: the compiler sees a
-    // Closeable assigned to a field and never closed. Testcontainers' JUnit extension owns
-    // the lifecycle of @Container fields and stops them after the class, so there is no leak.
+    // @SuppressWarnings("resource") 是必需的，不是装饰：编译器看到赋给字段的 Closeable，
+    // 且从未被关闭。Testcontainers 的 JUnit 扩展掌管 @Container 字段的生命周期，并在整个
+    // 测试类结束后停止它们，所以不存在泄漏。
     @Container
     @SuppressWarnings("resource")
     static final PostgreSQLContainer POSTGRES =
@@ -106,7 +105,7 @@ class OutboxPublisherIT {
         return jdbc.sql(sql).query(Integer.class).single();
     }
 
-    /** Reads whatever is on the topic, from the beginning. */
+    /** 从头读取主题上现有的所有内容。 */
     private List<ConsumerRecord<String, String>> drainTopic(String topic) {
         Properties props = new Properties();
         props.put("bootstrap.servers", KAFKA.getBootstrapServers());
@@ -177,8 +176,8 @@ class OutboxPublisherIT {
             await().atMost(Duration.ofSeconds(20))
                     .untilAsserted(() -> assertThat(outboxRows(true)).isZero());
 
-            // Asserted on THIS ride, not on a total: TRUNCATE resets Postgres between tests
-            // but the Kafka topic keeps every record the class has ever published.
+            // 断言的是这一趟行程，而不是总数：TRUNCATE 在测试之间重置 Postgres，
+            // 但 Kafka 主题保留着这个测试类发布过的每一条记录。
             List<ConsumerRecord<String, String>> records = drainTopic(Topics.RIDE_REQUESTED);
             assertThat(records)
                     .anySatisfy(record -> {

@@ -24,13 +24,12 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Verifies the Redis adapter against a real Redis, because the parts worth testing here are
- * exactly the parts a fake cannot model: {@code GEOADD} argument order, the distance units
- * {@code GEOSEARCH} returns, and whether a batch write really is one round trip.
+ * 针对真实 Redis 验证这个 Redis 适配器，因为这里值得测试的部分恰恰是伪造实现无法建模的
+ * 部分：{@code GEOADD} 的参数顺序、{@code GEOSEARCH} 返回的距离单位，以及批量写入是否
+ * 真的只需一次往返。
  *
- * <p>Skipped automatically when no container runtime is reachable, so a machine without a
- * mounted Podman socket still gets a green build rather than a confusing failure. See
- * ADR-0007 for the socket mount.
+ * <p>当容器运行时不可达时自动跳过，这样一台没有挂载 Podman socket 的机器仍能得到绿色构建，
+ * 而不是一个令人困惑的失败。socket 挂载参见 ADR-0007。
  */
 @Testcontainers
 @EnabledIf("containerRuntimeAvailable")
@@ -79,8 +78,8 @@ class RedisDriverLocationIndexIT {
         Instant now = Instant.now();
 
         index.upsertAll(List.of(
-                at(near, 30.0450, 31.2360, now),      // ~70m away
-                at(far, 30.2000, 31.2357, now)));     // ~17km away
+                at(near, 30.0450, 31.2360, now),      // 约 70 米远
+                at(far, 30.2000, 31.2357, now)));     // 约 17 公里远
 
         List<NearbyDriver> results = index.search(TAHRIR, 2_000, 10);
 
@@ -110,8 +109,8 @@ class RedisDriverLocationIndexIT {
     @Test
     @DisplayName("latitude and longitude survive the round trip in the right order")
     void coordinatesAreNotTransposed() {
-        // Redis takes longitude first; a transposition is silent and would put every driver
-        // in the wrong hemisphere. Cairo transposed lands in the Indian Ocean.
+        // Redis 先接收经度；参数调换不会有任何报错，却会让所有司机落进错误的半球。
+        // 开罗被调换后会落到印度洋。
         DriverId driver = DriverId.newId();
         index.upsertAll(List.of(at(driver, 30.0444, 31.2357, Instant.now())));
 

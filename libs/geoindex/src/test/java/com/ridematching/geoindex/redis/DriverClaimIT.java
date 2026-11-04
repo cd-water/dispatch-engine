@@ -28,10 +28,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The verification section of ADR-0004, made executable.
+ * ADR-0004 的验证章节，做成了可执行的形式。
  *
- * <p>This is the test the whole project is built around. Everything else can be argued about;
- * this either passes or the central claim in the README is false.
+ * <p>这是整个项目赖以构建的那个测试。其他一切都可以争论；这个测试要么通过，要么 README 中
+ * 的核心论断就是假的。
  */
 @Testcontainers
 @EnabledIf("containerRuntimeAvailable")
@@ -70,7 +70,7 @@ class DriverClaimIT {
         claims = new RedisDriverClaimStore(redis, keys);
     }
 
-    /** Puts a driver into the index as AVAILABLE, the way location-service would. */
+    /** 按 location-service 会采用的方式，把一个司机以 AVAILABLE 状态放入索引。 */
     private DriverId availableDriver() {
         DriverId driver = DriverId.newId();
         redis.opsForHash().put(keys.driverState(driver), "status", "AVAILABLE");
@@ -101,15 +101,15 @@ class DriverClaimIT {
             ClaimResult second = claims.claim(driver, "offer-2", TTL);
 
             assertThat(second.won()).isFalse();
-            // Refused on status, because the first claim already flipped it to RESERVED.
+            // 因状态而被拒绝，因为第一次认领已经把它翻转为 RESERVED。
             assertThat(second.reason()).isIn(ClaimResult.NOT_AVAILABLE, ClaimResult.ALREADY_CLAIMED);
         }
 
         @Test
         @DisplayName("an unknown driver is refused rather than claimed")
         void unknownDriverIsRefused() {
-            // A driver absent from the index went offline or was reaped. Claiming them would
-            // dispatch an offer nobody receives and burn the whole offer TTL.
+            // 不在索引中的司机已经下线，或已被清理器回收。认领他们只会派出一个无人接收的
+            // 报价，并烧掉整个报价 TTL。
             ClaimResult result = claims.claim(DriverId.newId(), "offer-1", TTL);
 
             assertThat(result.won()).isFalse();
@@ -133,8 +133,8 @@ class DriverClaimIT {
             DriverId driver = availableDriver();
             claims.claim(driver, "offer-1", TTL);
 
-            // Without the token check, a worker whose claim already expired could delete the
-            // claim of whoever legitimately took the driver next.
+            // 没有令牌校验，一个认领已过期的工作者就可能删除随后合法接手该司机的那个工作者
+            // 所持有的认领。
             assertThat(claims.release(driver, "offer-SOMEONE-ELSE")).isFalse();
             assertThat(claims.statusOf(driver)).isEqualTo("RESERVED");
         }
@@ -145,8 +145,7 @@ class DriverClaimIT {
             DriverId driver = availableDriver();
             claims.claim(driver, "offer-1", Duration.ofMillis(300));
 
-            // The TTL is the safety valve: a worker that dies between claiming and dispatching
-            // must not strand the driver forever.
+            // TTL 是安全阀：一个在认领与派单之间死去的工作者，不能让司机被永远困住。
             Thread.sleep(500);
 
             assertThat(redis.hasKey(keys.claim(driver))).isFalse();
@@ -167,8 +166,8 @@ class DriverClaimIT {
             long second = claims.claim(b, "o2", TTL).fenceToken();
             long third = claims.claim(c, "o3", TTL).fenceToken();
 
-            // Monotonicity is what lets a resource reject a write from a worker whose lease
-            // lapsed while it was paused — the failure plain lease locks permit.
+            // 单调性正是让资源能够拒绝一个在暂停期间租约失效的工作者写入的依据——这是
+            // 普通租约锁允许的失败模式。
             assertThat(first).isLessThan(second);
             assertThat(second).isLessThan(third);
         }
@@ -207,9 +206,8 @@ class DriverClaimIT {
                 String token = "offer-" + i;
                 Thread.ofVirtual().start(() -> {
                     try {
-                        // Every thread parks here so they are released simultaneously. The
-                        // window between HGET and HSET is microseconds; this is how you
-                        // actually aim at it.
+                        // 每个线程都先在这里停住，从而被同时放行。HGET 与 HSET 之间的窗口
+                        // 只有微秒级；这才是真正瞄准这个窗口的方法。
                         startGate.await();
                         ClaimResult result = claims.claim(driver, token, TTL);
                         if (result.won()) {
@@ -271,7 +269,7 @@ class DriverClaimIT {
             startGate.countDown();
             assertThat(finished.await(30, TimeUnit.SECONDS)).isTrue();
 
-            // Contention on one driver must not serialise claims on unrelated drivers.
+            // 一个司机上的争用不得把不相关司机的认领串行化。
             assertThat(winners.get()).isEqualTo(count);
             drivers.forEach(d -> fences.add(claims.fenceOf(d).orElseThrow()));
             assertThat(fences)

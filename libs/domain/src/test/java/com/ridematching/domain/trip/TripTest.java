@@ -155,8 +155,8 @@ class TripTest {
             Trip trip = tripWithOffer(DriverId.newId());
             trip.releaseOffer("offer expired");
 
-            // A stale worker waking up late and replaying its old claim must be rejected:
-            // this is the failure mode plain lease locks allow (ADR-0004).
+            // 迟醒的过期 worker 重放其旧认领时必须被拒绝：
+            // 这正是普通租约锁允许发生的失效模式（ADR-0004）。
             assertThatThrownBy(() -> trip.offerTo(DriverId.newId(), 1L, "offer-1"))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessageContaining("Stale fence token");
@@ -249,8 +249,8 @@ class TripTest {
             assertThatExceptionOfType(IllegalTripTransitionException.class)
                     .isThrownBy(trip::complete);
 
-            // A failed transition that half-applied would be worse than one that throws:
-            // the trip must be exactly as it was.
+            // 半途生效的失败转换比直接抛出异常更糟：
+            // 行程必须与之前完全一致。
             assertThat(trip.status()).isEqualTo(TripStatus.OFFERED);
             assertThat(trip.assignedDriver()).contains(driver);
             assertThat(trip.history()).hasSize(historyBefore);

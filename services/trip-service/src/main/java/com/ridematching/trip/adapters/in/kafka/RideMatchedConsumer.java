@@ -19,20 +19,16 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.Optional;
 
 /**
- * Makes a match durable.
+ * 让匹配结果变得持久。
  *
- * <p>This is the write that the whole concurrency design is built around. The matching engine
- * claims a driver in Redis and announces it; until this consumer runs, that claim is the only
- * record of the assignment and it is one that expires. Here the assignment enters PostgreSQL,
- * where {@code uniq_driver_active_trip} either accepts it or rejects it — and the rejection
- * is the guarantee working, not a bug.
+ * <p>整个并发设计都围绕这一次写入展开。匹配引擎在 Redis 中认领一个司机并宣告结果；在这个
+ * 消费者运行之前，该认领就是这次指派的唯一记录，而它还会过期。到这里，指派进入 PostgreSQL，
+ * 由 {@code uniq_driver_active_trip} 决定接受还是拒绝——拒绝意味着保证在生效，而不是 bug。
  *
- * <p>The two layers can genuinely disagree. Redis grants a claim to whoever asks first; the
- * index rejects a driver already recorded on another trip. A Redis flush, an expired lease, or
- * a paused worker are all cases where the fast path says yes and the durable one says no. When
- * that happens the correct action is to give the driver straight back, which is what the
- * failure branch below does — otherwise a driver would be reserved in Redis for a trip that
- * never got them.
+ * <p>两层确实可能不一致。Redis 把认领授予最先发问的人；索引则拒绝已经记录在另一趟行程上的
+ * 司机。Redis 被清空、租约过期、某个 worker 被暂停，都会造成快速路径说"是"而持久层说"否"。
+ * 一旦发生，正确的动作是立刻把司机还回去，下面的失败分支正是这么做的——否则一个司机就会在
+ * Redis 中为一次从未落到他头上的行程保持预留。
  */
 public class RideMatchedConsumer {
 
@@ -59,8 +55,8 @@ public class RideMatchedConsumer {
 
         this.recorded = Counter.builder("trip.assignment.recorded")
                 .description("Matches made durable in PostgreSQL").register(meters);
-        // The one to watch in a load test. Non-zero means Redis and PostgreSQL disagreed and
-        // the index arbitrated — exactly the event S3 is designed to provoke.
+        // 负载测试中要看的就是这一个。非零意味着 Redis 与 PostgreSQL 不一致、由索引来
+        // 仲裁——正是 S3 场景设计要触发的事件。
         this.rejected = Counter.builder("trip.assignment.rejected")
                 .description("Matches the unique index refused").register(meters);
         this.unmatched = Counter.builder("trip.unmatched")
@@ -80,16 +76,15 @@ public class RideMatchedConsumer {
         try {
             record(event);
         } catch (DriverAlreadyAssignedException e) {
-            // Not rethrown. A redelivery would fail identically, so retrying forever would
-            // stall the partition on an event whose outcome is already settled: this trip does
-            // not get this driver. The marker stays set for the same reason.
+            // 不重抛。重新投递会以完全相同的方式失败，所以永远重试只会让分区卡在一个结果
+            // 已定的事件上：这趟行程拿不到这个司机。去重标记同样出于这个原因保持设置。
             rejected.increment();
             releaseLostClaim(event);
             log.info("Match for ride {} refused by the unique index; driver {} released",
                     event.rideId(), event.driverId());
         } catch (RuntimeException e) {
-            // Anything else is transient. Forget the marker so the redelivery is a real retry
-            // rather than a silent drop.
+            // 其他任何异常都是暂时性的。忘掉标记，让重新投递成为一次真正的重试，而不是
+            // 静默丢弃。
             processed.forget(event.eventId().toString());
             throw e;
         }
@@ -99,18 +94,16 @@ public class RideMatchedConsumer {
         RideId rideId = new RideId(event.rideId());
         Optional<TripStore.Versioned> loaded = trips.load(rideId);
         if (loaded.isEmpty()) {
-            // The match arrived before its trip exists, which the outbox makes impossible: the
-            // request event is only published after the trip row commits. Worth saying out
-            // loud rather than silently ignoring, because if it ever happens the outbox
-            // ordering assumption has broken.
+            // 匹配结果在其行程存在之前就到了，而发件箱让这不可能发生：请求事件只在行程行
+            // 提交之后才发布。值得大声说出来而不是静默忽略，因为一旦发生，就说明发件箱的
+            // 顺序假设已经被打破。
             log.warn("Match for unknown ride {}; ignoring", event.rideId());
             return;
         }
 
         Trip trip = loaded.get().trip();
-        // The matching engine consumed the request, so the trip is still REQUESTED here —
-        // MATCHING is the state it was in while the search ran, and that search happened in
-        // another service. Recording it keeps the audit trail honest about what took place.
+        // 匹配引擎消费了请求，所以这里行程仍是 REQUESTED——MATCHING 是搜索运行期间它所在
+        // 的状态，而搜索发生在另一个服务里。记录它，让审计追踪诚实地反映实际发生了什么。
         trip.beginMatching();
         trip.offerTo(new DriverId(event.driverId()), event.fenceToken(), event.offerToken());
 
@@ -119,10 +112,10 @@ public class RideMatchedConsumer {
     }
 
     /**
-     * Hands back a driver the index would not let this trip have.
+     * 交还一个索引不肯让这趟行程得到的司机。
      *
-     * <p>Without this the driver stays RESERVED in Redis until the claim TTL lapses, unable to
-     * be offered to anyone — a driver taken out of the pool by a match that did not happen.
+     * <p>没有这一步，司机会在 Redis 中保持 RESERVED 直到认领 TTL 失效，期间无法被报价给
+     * 任何人——一个被没有真正发生的匹配移出池子的司机。
      */
     private void releaseLostClaim(RideMatched event) {
         try {

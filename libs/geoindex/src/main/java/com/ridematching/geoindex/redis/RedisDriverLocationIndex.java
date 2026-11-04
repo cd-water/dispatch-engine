@@ -25,16 +25,15 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Redis implementation of the live driver index (ADR-0002).
+ * 在线司机索引的 Redis 实现（ADR-0002）。
  *
- * <p>Two keys, both hash-tagged on the city so a cluster keeps them in one slot — {@code
- * GEOSEARCH} cannot span slots, and neither can the Lua claim script that the matching engine
- * runs against the same namespace:
+ * <p>两个 key，都以城市作为 hash tag，从而让集群把它们放在同一个槽里——{@code
+ * GEOSEARCH} 无法跨槽，匹配引擎对同一命名空间运行的 Lua 认领脚本同样不行：
  *
  * <ul>
- *   <li>{@code geo:drivers:{city}} — the geospatial sorted set</li>
- *   <li>{@code driver:seen:{city}} — a sorted set scored by last-report epoch millis, which
- *       turns "who has gone quiet?" into a single {@code ZRANGEBYSCORE} instead of a scan</li>
+ *   <li>{@code geo:drivers:{city}} —— 地理空间有序集合</li>
+ *   <li>{@code driver:seen:{city}} —— 以最后一次上报的 epoch 毫秒数为分数的有序集合，它把
+ *       "谁已经没有动静了？"变成一次 {@code ZRANGEBYSCORE}，而不是一次扫描</li>
  * </ul>
  */
 public class RedisDriverLocationIndex implements DriverLocationIndex {
@@ -57,16 +56,16 @@ public class RedisDriverLocationIndex implements DriverLocationIndex {
             return;
         }
 
-        // One GEOADD and one ZADD for the whole batch, whatever its size. This is the
-        // difference between ~20 round trips per second and ~10,000.
+        // 无论批次多大，整个批次只需要一次 GEOADD 和一次 ZADD。这就是
+        // 每秒约 20 次往返和每秒约 10,000 次往返之间的差别。
         Map<String, Point> positions = new HashMap<>(locations.size());
         Set<org.springframework.data.redis.core.ZSetOperations.TypedTuple<String>> seen =
                 new java.util.HashSet<>(locations.size());
 
         for (DriverLocation location : locations) {
             String member = location.driverId().toString();
-            // Redis takes longitude first. Swapping these is silent and puts every driver in
-            // the wrong hemisphere, so it is worth stating.
+            // Redis 先接收经度。把这两个参数调换不会有任何报错，却会让所有司机落进
+            // 错误的半球，所以值得写明。
             positions.put(member, new Point(location.coordinates().longitude(),
                     location.coordinates().latitude()));
             seen.add(org.springframework.data.redis.core.ZSetOperations.TypedTuple.of(

@@ -1,6 +1,5 @@
-# Only what is specific to this service. Everything else — virtual threads, actuator
-# exposure, graceful shutdown, metric tags — comes from platform-defaults.yml, which
-# ships inside the platform module on the classpath.
+# 仅包含本服务特有的配置。其余一切——虚拟线程、actuator 暴露、优雅停机、
+# 指标标签——都来自 platform-defaults.yml，它随 platform 模块一起位于 classpath 上。
 spring:
   application:
     name: dispatch-api
@@ -12,17 +11,16 @@ spring:
     username: ${POSTGRES_USER:ride}
     password: ${POSTGRES_PASSWORD:ride}
     hikari:
-      # Sized deliberately rather than left at the default. Virtual threads make it trivial
-      # to create thousands of concurrent callers, so the connection pool becomes the real
-      # limit on database concurrency — and that limit should be explicit (ADR-0006).
+      # 刻意设定大小，而不是沿用默认值。虚拟线程让创建数千个并发调用者变得轻而易举，
+      # 因此连接池才是数据库并发的真正上限——而这个上限应当被明确设定（ADR-0006）。
       maximum-pool-size: 20
       minimum-idle: 5
       connection-timeout: 3000
 
   flyway:
     enabled: true
-    # No baseline: this database is created by these migrations, so an existing schema with
-    # no history table means something is wrong and the build should say so.
+    # 不做基线（baseline）：这个数据库由这些迁移创建，因此若存在 schema 却没有历史表，
+    # 就说明出了问题，构建应当大声报出来。
     baseline-on-migrate: false
 
 server:

@@ -1,31 +1,29 @@
-# Configuration every service shares. Imported, not auto-loaded:
+# 所有服务共享的配置。通过显式导入加载，而不是自动加载：
 #
 #   spring:
 #     config:
 #       import: "classpath:platform-defaults.yml"
 #
-# Deliberately NOT named application-common.yml — Spring Boot reads "application-<x>.yml"
-# as the profile-specific file for profile <x>, so that name would silently create a
-# phantom "common" profile. This file has a neutral name and is pulled in explicitly.
+# 刻意不命名为 application-common.yml——Spring Boot 会把 "application-<x>.yml" 当作
+# profile <x> 的专属文件，于是那个名字会悄悄创建一个并不存在的 "common" profile。
+# 这个文件使用中性名称，并被显式导入。
 #
-# Imported documents have LOWER precedence than the file importing them, so a service can
-# override any of this in its own application.yml.
+# 被导入文档的优先级低于导入它的文件，因此服务可以在自己的 application.yml 中覆盖这里的任何配置。
 #
-# Keep this as ONE "spring:" mapping. A second top-level "spring:" key later in the file is a
-# duplicate key: the parser either rejects it or silently keeps only one branch, which would
-# quietly turn off virtual threads while everything still compiled.
+# 保持它只有一个 "spring:" 映射。文件后面再出现第二个顶层 "spring:" 键属于重复键：
+# 解析器要么拒绝，要么静默只保留一个分支，从而在一切照常编译的情况下悄悄关闭虚拟线程。
 
 spring:
   threads:
     virtual:
-      # ADR-0006. One virtual thread per request; blocking code, reactive scalability.
+      # ADR-0006。每个请求一个虚拟线程；阻塞式代码，反应式级别的可伸缩性。
       enabled: true
 
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:29092}
     producer:
-      # acks=all plus idempotence: a producer retry must not silently duplicate or reorder a
-      # record. The cost is latency on the ack, which the outbox absorbs off the request path.
+      # acks=all 加幂等：生产者的重试不得悄悄重复或重排记录。代价是 ack 的延迟，
+      # 而这部分延迟由发件箱移出了请求路径。
       acks: all
       properties:
         enable.idempotence: true
@@ -35,11 +33,10 @@ spring:
     consumer:
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      # earliest: a new consumer group must see the backlog rather than silently skipping
-      # everything published before it started.
+      # earliest：新的消费者组必须看到积压，而不是悄悄跳过它启动前发布的所有内容。
       auto-offset-reset: earliest
-      # Offsets are committed after the listener returns, which is what makes delivery
-      # at-least-once rather than at-most-once. Consumers dedupe on eventId.
+      # 偏移量在监听器返回之后才提交，这正是投递语义为至少一次而不是至多一次的原因。
+      # 消费者按 eventId 去重。
       enable-auto-commit: false
     listener:
       ack-mode: record
@@ -51,7 +48,7 @@ management:
   endpoints:
     web:
       exposure:
-        # Only what is needed: an open actuator surface is an information leak.
+        # 只暴露需要的内容：开放的 actuator 面就是信息泄露。
         include: health,info,prometheus
   endpoint:
     health:
@@ -60,7 +57,7 @@ management:
       show-details: always
   metrics:
     tags:
-      # Resolved from each service's own application.yml.
+      # 从各服务自己的 application.yml 中解析。
       application: ${spring.application.name}
 
 logging:

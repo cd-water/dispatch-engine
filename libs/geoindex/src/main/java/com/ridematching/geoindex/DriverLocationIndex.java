@@ -9,45 +9,43 @@ import java.time.Instant;
 import java.util.List;
 
 /**
- * The geospatial index of live driver positions — an outbound port (ADR-0001).
+ * 在线司机位置的地理空间索引——一个出站端口（ADR-0001）。
  *
- * <p>Redis is the implementation the system ships with (ADR-0002), but nothing above this
- * interface knows that. The interface is what makes the PostGIS comparison benchmark on the
- * roadmap possible: a second adapter, the same tests, the same load.
+ * <p>Redis 是系统随附的实现（ADR-0002），但这个接口之上的任何东西都不知道这一点。正是这个
+ * 接口让路线图上的 PostGIS 对比基准成为可能：第二个适配器，同样的测试，同样的负载。
  */
 public interface DriverLocationIndex {
 
     /**
-     * Writes a batch of positions.
+     * 写入一批位置。
      *
-     * <p>Batch rather than single-write because the target is 10,000 updates/sec. A round trip
-     * per frame would spend the entire latency budget on network overhead; one pipelined call
-     * per batch turns thousands of round trips per second into tens.
+     * <p>用批量而不是逐条写入，因为目标是每秒 10,000 次更新。每一帧一次往返会把整个延迟
+     * 预算都耗在网络开销上；每批一次流水线调用把每秒数千次往返降到几十次。
      */
     void upsertAll(List<DriverLocation> locations);
 
-    /** Registers a driver as connected and dispatchable. */
+    /** 将司机登记为已连接且可派单。 */
     void markOnline(DriverId driverId);
 
     /**
-     * Removes a driver from the index entirely.
+     * 将司机从索引中彻底移除。
      *
-     * <p>Removal rather than a status flag: a disconnected driver must not be returned by a
-     * proximity search at all, and filtering after the fact would waste candidate slots.
+     * <p>用移除而不是状态标志：一个已断连的司机根本不应被邻近搜索返回，事后过滤只会浪费
+     * 候选名额。
      */
     void markOffline(DriverId driverId);
 
-    /** Candidates within {@code radiusMeters}, nearest first, capped at {@code limit}. */
+    /** {@code radiusMeters} 范围内的候选者，由近及远，最多 {@code limit} 个。 */
     List<NearbyDriver> search(Coordinates center, double radiusMeters, int limit);
 
     /**
-     * Drops drivers whose last report is older than {@code cutoff}, returning how many went.
+     * 清除最后一次上报早于 {@code cutoff} 的司机，返回清除了多少个。
      *
-     * <p>Covers half-open connections: a socket that died without a close frame leaves a
-     * "ghost driver" that would otherwise be matched and never respond.
+     * <p>覆盖半开连接的情况：一个没发送关闭帧就死掉的 socket 会留下一个"幽灵司机"，否则它
+     * 会被匹配到却永远不应答。
      */
     int evictStaleOlderThan(Instant cutoff);
 
-    /** Number of drivers currently in the index. Exposed as a gauge. */
+    /** 当前索引中的司机数量。以 gauge 形式暴露。 */
     long size();
 }

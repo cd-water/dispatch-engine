@@ -26,14 +26,14 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The matching loop with no Redis: the ports make the interesting behaviour — what happens
- * when claims are LOST — testable directly, which is otherwise awkward to provoke on purpose.
+ * 不带 Redis 的匹配循环：端口让有意思的行为——认领<em>失败</em>时会发生什么——可以被直接
+ * 测试，否则刻意触发它相当别扭。
  */
 class DriverMatcherTest {
 
     private static final Coordinates PICKUP = new Coordinates(30.0444, 31.2357);
 
-    /** Returns configured candidates per radius, so radius expansion can be observed. */
+    /** 按半径返回配置好的候选，以便观察半径扩展。 */
     private static final class StubIndex implements DriverLocationIndex {
         final Map<Double, List<NearbyDriver>> byRadius = new HashMap<>();
         final List<Double> searchedRadii = new ArrayList<>();
@@ -64,7 +64,7 @@ class DriverMatcherTest {
         }
     }
 
-    /** Grants claims only for drivers in {@code claimable}, recording every attempt. */
+    /** 只对 {@code claimable} 中的司机授予认领，并记录每一次尝试。 */
     private static final class StubClaims implements DriverClaimStore {
         final Set<DriverId> claimable = new java.util.HashSet<>();
         final List<DriverId> attempts = new ArrayList<>();
@@ -183,7 +183,7 @@ class DriverMatcherTest {
 
             matcher.match(PICKUP, "offer-1");
 
-            // A load test where this stays zero has not exercised the race at all.
+            // 这个值始终为零的负载测试，根本没有触发过竞争。
             assertThat(counter("driver.claim.contention")).isEqualTo(1.0);
         }
 
@@ -258,8 +258,7 @@ class DriverMatcherTest {
         @Test
         @DisplayName("the claim TTL outlives the offer TTL")
         void claimOutlivesOffer() {
-            // If the offer could outlive the claim, a driver could be re-claimed in the gap
-            // between the offer lapsing and the engine noticing.
+            // 如果报价能比认领活得久，司机就会在报价失效与引擎察觉之间的间隙里被再次认领。
             assertThat(properties.getClaimTtl())
                     .isGreaterThan(properties.getOfferTtl());
         }

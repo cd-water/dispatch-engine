@@ -7,10 +7,10 @@ import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
 
 /**
- * Wire format for POST /v1/rides.
+ * POST /v1/rides 的线上格式。
  *
- * <p>Separate from the domain types on purpose (ADR-0001): validation annotations and JSON
- * concerns belong at the edge, not on {@code Coordinates}.
+ * <p>刻意与领域类型分离（ADR-0001）：校验注解和 JSON 相关关注点属于边缘，而不属于
+ * {@code Coordinates}。
  */
 public record RideRequestDto(
         @NotNull UUID riderId,

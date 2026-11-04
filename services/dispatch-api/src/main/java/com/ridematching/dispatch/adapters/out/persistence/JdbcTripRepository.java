@@ -20,12 +20,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * PostgreSQL persistence for the trip aggregate.
+ * 行程聚合的 PostgreSQL 持久化。
  *
- * <p>Maps the domain object to columns by hand rather than through JPA. The aggregate stays a
- * plain object with no annotations (ADR-0001), and the mapping lives here where it belongs —
- * which also means the SQL that carries the concurrency guarantee is visible rather than
- * generated.
+ * <p>手工把领域对象映射到列，而不是通过 JPA。聚合保持为一个没有注解的普通对象（ADR-0001），
+ * 映射住在它该在的地方——这也意味着承载并发保证的 SQL 是可见的，而不是被生成的。
  */
 public class JdbcTripRepository implements TripRepository {
 
@@ -40,8 +38,8 @@ public class JdbcTripRepository implements TripRepository {
     @Override
     @Transactional
     public void insertWithEvent(Trip trip, DomainEvent event) {
-        // Both writes go through the same JdbcClient inside one @Transactional boundary, so
-        // they share a connection and commit or roll back together.
+        // 两次写入都在同一个 @Transactional 边界内经由同一个 JdbcClient，所以它们共享连接，
+        // 一起提交或一起回滚。
         insert(trip);
         outbox.append(event);
     }
@@ -76,16 +74,15 @@ public class JdbcTripRepository implements TripRepository {
                     .param("completedAt", trip.completedAt().map(Timestamp::from).orElse(null))
                     .update();
         } catch (DuplicateKeyException e) {
-            // Either the ride id collided (effectively impossible with UUIDv4) or
-            // uniq_driver_active_trip fired. The latter is the ADR-0004 guarantee doing its
-            // job and is expected under contention, so it gets its own type rather than
-            // surfacing as a generic persistence failure.
+            // 要么是行程 id 冲突（对 UUIDv4 来说实际上不可能），要么是
+            // uniq_driver_active_trip 触发了。后者是 ADR-0004 的保证在履职，在争用下是
+            // 预期之内的，所以给它独立的类型，而不是作为通用的持久化失败露出来。
             throw new DriverAlreadyAssignedException(
                     "Trip %s could not be inserted; a driver may already hold an active trip"
                             .formatted(trip.id()), e);
         }
 
-        // Same transaction as the trip row: the audit trail cannot drift from the state.
+        // 与行程行同属一个事务：审计追踪不可能与状态脱节。
         for (TripTransition transition : trip.history()) {
             insertEvent(trip.id(), transition);
         }
@@ -118,8 +115,8 @@ public class JdbcTripRepository implements TripRepository {
                         """)
                 .param("id", rideId.value())
                 .query((rs, rowNum) -> {
-                    // Rebuilt through the domain factory so an invalid row cannot produce an
-                    // invalid aggregate — the record's own validation runs on the way back in.
+                    // 经由领域工厂重建，这样无效的行无法产生无效的聚合——记录自身的校验
+                    // 会在回程中运行。
                     Trip trip = Trip.request(
                             new RideId(rs.getObject("id", UUID.class)),
                             new RiderId(rs.getObject("rider_id", UUID.class)),
@@ -137,12 +134,11 @@ public class JdbcTripRepository implements TripRepository {
     }
 
     /**
-     * Intermediate carrier for a row read back.
+     * 读回一行时的中间载体。
      *
-     * <p>Replaying stored state onto the aggregate is deferred until the trip lifecycle moves
-     * to trip-service, which owns transitions. Today the API only ever reads back trips it
-     * just created, all in REQUESTED, so reconstructing history is not yet needed — noted
-     * rather than silently ignored.
+     * <p>把已存储的状态回放到聚合上这件事，推迟到行程生命周期迁移到 trip-service（它拥有
+     * 状态转换）时再做。目前这个 API 只会读回它刚刚创建的行程，全都处于 REQUESTED，所以还
+     * 不需要重建历史——这里记下而不是默默忽略。
      */
     private record StoredTrip(Trip trip, TripStatus status, UUID driverId) {
     }

@@ -6,24 +6,22 @@ import com.ridematching.events.DomainEvent;
 
 import java.util.Optional;
 
-/** Persistence port for the trip aggregate (ADR-0001). */
+/** 行程聚合的持久化端口（ADR-0001）。 */
 public interface TripRepository {
 
     /**
-     * Inserts a newly requested trip along with its initial history entry, in one transaction.
+     * 在一个事务中插入一趟新请求的行程及其初始历史条目。
      *
-     * @throws com.ridematching.dispatch.application.DriverAlreadyAssignedException if the
-     *         {@code uniq_driver_active_trip} index rejects the write — the structural
-     *         guarantee from ADR-0004 firing
+     * @throws com.ridematching.dispatch.application.DriverAlreadyAssignedException 若
+     *         {@code uniq_driver_active_trip} 索引拒绝了写入——ADR-0004 的结构性保证在生效
      */
     void insert(Trip trip);
 
     /**
-     * Inserts a trip and records {@code event} for publication, atomically.
+     * 原子地插入一趟行程，并记录 {@code event} 供发布。
      *
-     * <p>One transaction, two writes. This is the whole point of the outbox: there is no
-     * ordering of "save" and "publish" that is safe when they are separate commits, so they
-     * are made into one (ADR-0003).
+     * <p>一个事务，两次写入。这就是发件箱的全部意义：当"保存"和"发布"是两次独立提交时，
+     * 不存在任何一种安全的先后顺序，所以把它们合并成一次（ADR-0003）。
      */
     void insertWithEvent(Trip trip, DomainEvent event);
 

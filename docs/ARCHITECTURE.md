@@ -1,98 +1,80 @@
-# System Design: Real-Time Ride-Matching Engine
+# 系统设计：实时派单引擎（Real-Time Ride-Matching Engine）
 
-> Companion to the [README](../README.md). This document is the full design: components, data
-> models, algorithms, failure modes, and capacity reasoning.
-
----
-
-## 1. Problem Statement
-
-Build the dispatch core of a ride-hailing platform:
-
-1. Continuously ingest GPS positions from thousands of moving drivers.
-2. When a rider requests a trip, find nearby available drivers within seconds.
-3. Assign exactly one driver to exactly one ride — **never** two.
-4. Keep downstream concerns (notifications, billing) off the request path.
-5. Prove all of the above under load, with metrics.
-
-### Non-goals
-
-Deliberately out of scope, so the design stays focused:
-
-- Routing / ETA from a real road network (a haversine + average-speed proxy is used instead)
-- Surge pricing, driver payouts, real payment processing
-- Authentication beyond a stubbed bearer token
-- Multi-region replication
-- Any user interface
+> [README](../README.md) 的配套文档。本文是完整设计：组件、数据模型、算法、故障模式，以及容量推导。
 
 ---
 
-## 2. Capacity Model
+## 1. 问题陈述
 
-The design targets a single mid-sized city. Numbers drive the architecture; they are not decoration.
+构建一个网约车平台的派单核心：
 
-| Quantity | Value | Derivation |
+1. 持续接入数千名移动中司机的 GPS 位置。
+2. 当乘客发出叫车请求时，在数秒内找到附近可用的司机。
+3. 将恰好一名司机分配给恰好一个行程——**绝不**重复。
+4. 让下游关注点（通知、计费）远离请求路径。
+5. 在负载下用指标证明上述所有内容。
+
+### 非目标
+
+刻意排除在范围之外，以保持设计聚焦：
+
+- 基于真实路网的路径规划 / ETA（改用 haversine + 平均速度的近似）
+- 动态加价、司机结算、真实支付处理
+- 除桩化 bearer token 之外的认证
+- 多区域复制
+- 任何用户界面
+
+---
+
+## 2. 容量模型
+
+本设计面向一座中等规模的单城。数字驱动架构，它们不是装饰。
+
+| 数量 | 数值 | 推导 |
 |---|---|---|
-| Active drivers | 10,000 | Target load |
-| Location frequency | 1 Hz | Standard for dispatch systems |
-| **Location writes** | **10,000/s** | 10k × 1 Hz |
-| Location payload | ~120 bytes | id, lat, lng, heading, speed, ts |
-| **Ingest bandwidth** | ~1.2 MB/s | 10k × 120 B |
-| Ride requests | 500/s peak | ~1 request per 20 drivers/s |
-| GEOSEARCH per ride | 1–3 | Expanding-radius retries |
-| Redis memory | ~50 MB | 10k geo entries + state hashes, tiny |
-| Postgres write rate | ~1,500/s | Trips + state transitions + outbox |
+| 活跃司机 | 10,000 | 目标负载 |
+| 位置上报频率 | 1 Hz | 派单系统的通用标准 |
+| **位置写入** | **10,000/s** | 10k × 1 Hz |
+| 位置报文大小 | ~120 字节 | id、lat、lng、heading、speed、ts |
+| **接入带宽** | ~1.2 MB/s | 10k × 120 B |
+| 叫车请求 | 500/s 峰值 | 每秒约每 20 名司机 1 个请求 |
+| 每次叫车的 GEOSEARCH | 1–3 | 扩展半径（expanding search）重试 |
+| Redis 内存 | ~50 MB | 10k 条地理条目 + 状态哈希，极小 |
+| Postgres 写入速率 | ~1,500/s | 行程 + 状态流转 + 发件箱 |
 
-**The critical observation:** location writes outnumber ride writes by **20:1**, and location data is
-disposable — only the newest position matters. Ride data is durable, transactional, and auditable.
-These two workloads have opposite requirements, so they get different stores. This split is the
-single most important decision in the system.
+**关键观察：** 位置写入量以 **20:1** 的比例远超行程写入量，而且位置数据是可丢弃的——只有最新的位置有意义。行程数据则是持久化、事务化且可审计的。这两类工作负载的需求截然相反，因此使用不同的存储。这一拆分是整个系统中最重要的单一决策。
 
 ---
 
-## 3. Component Design
+## 3. 组件设计
 
-### 3.1 Location Service — WebSocket ingestion
+### 3.1 位置服务（Location Service）—— WebSocket 接入
 
-**Responsibility:** terminate driver WebSocket connections, validate frames, and land positions in
-the geospatial index with minimal latency.
+**职责：** 终结司机的 WebSocket 连接、校验帧，并以最小的延迟将位置落入地理空间索引。
 
-**Connection model.** Java 25 virtual threads: one virtual thread per connection is affordable at
-10k connections (~1 KB stack each initially) where 10k platform threads would not be. This gives
-straight-line blocking code — readable and debuggable — with reactive-grade scalability.
-See [ADR-0006](adr/0006-java21-virtual-threads.md).
+**连接模型。** Java 25 虚拟线程：在 10k 连接规模下，每个连接一个虚拟线程（初始各约 1 KB 栈）是可承受的，而 10k 平台线程则不然。这带来了直白阻塞式的代码——可读、可调试——同时具备反应式级别的可伸缩性。
+参见 [ADR-0006](adr/0006-java21-virtual-threads.md)。
 
-**Frame protocol** (JSON; Protobuf is a documented upgrade path):
+**帧协议**（JSON；Protobuf 是文档化的升级路径）：
 
 ```json
 { "t": "loc", "driverId": "d-8842", "lat": 30.0444, "lng": 31.2357,
   "heading": 274.5, "speedKph": 38.2, "ts": 1735689600123 }
 ```
 
-**Write path, per frame:**
+**写入路径，逐帧执行：**
 
-1. **Validate** — driver ID is authenticated on the connection, not trusted from the frame;
-   coordinates bounds-checked; timestamp rejected if skewed more than 30 s.
-2. **Throttle** — skip the write if the driver has moved less than 25 m *and* less than 3 s have
-   passed since their last persisted position. On typical urban movement this cuts Redis writes by
-   roughly 40–60% at no loss of matching quality.
-3. **Batch** — frames accumulate in a bounded ring buffer per shard; a flusher drains it every 50 ms
-   or at 500 entries into a single Redis pipeline. This turns 10,000 round trips/s into ~20 pipelined
-   batches/s per shard.
-4. **Backpressure** — the buffer is bounded and **drop-oldest**. A stale position has no value, so
-   shedding it is correct behavior, not data loss. Drops are counted in
-   `location_frames_dropped_total`; a non-zero rate is an alert, not a silent failure.
-5. **Mirror** — the frame is also produced to `driver.location.v1` with `acks=1`, `linger.ms=20`,
-   lz4 compression. Failures here are logged and dropped; telemetry must never block dispatch.
+1. **校验** —— 司机 ID 在连接上完成认证，不信任帧内字段；坐标做边界检查；时间戳偏移超过 30 s 则拒绝。
+2. **限流** —— 若司机位移小于 25 m *且* 距其上次持久化位置不足 3 s，则跳过本次写入。在典型城市移动场景下，这能减少约 40–60% 的 Redis 写入，且不损失匹配质量。
+3. **批处理** —— 帧在每个分片内有界环形缓冲区中累积；刷新器每 50 ms 或在满 500 条时将其汇入一次 Redis pipeline。这把每秒 10,000 次往返变为每分片每秒约 20 个流水线批次。
+4. **背压** —— 缓冲区有界且采用丢弃最旧（drop-oldest）策略。过期位置毫无价值，因此丢弃它是正确行为，而非数据丢失。丢弃数计入 `location_frames_dropped_total`；非零速率是一条告警，而不是静默失败。
+5. **镜像** —— 该帧同时以 `acks=1`、`linger.ms=20`、lz4 压缩生产到 `driver.location.v1`。此处失败只记录日志并丢弃；遥测绝不能阻塞派单。
 
-**Disconnection handling.** On socket close, the driver is marked `OFFLINE` and removed from the geo
-index. A separate reaper sweeps a `ZSET` of `lastSeenAt` every 10 s and evicts any driver silent for
-more than 30 s, covering half-open connections that never emit a close frame.
+**断连处理。** 套接字关闭时，司机被标记为 `OFFLINE` 并从地理索引中移除。另一个独立的清理器（reaper）每 10 s 扫描一个按 `lastSeenAt` 排序的 `ZSET`，驱逐任何静默超过 30 s 的司机，以覆盖那些永远不会发出关闭帧的半开连接。
 
-### 3.2 Dispatch API — request intake
+### 3.2 派单 API（Dispatch API）—— 请求受理
 
-**Responsibility:** accept ride requests, enforce idempotency, and hand off. It performs **no
-matching** — it is deliberately thin so its latency is predictable.
+**职责：** 接收叫车请求、强制幂等，然后移交。它**不做任何匹配**——刻意保持轻薄，因此其延迟可预测。
 
 ```
 POST /v1/rides
@@ -106,19 +88,15 @@ POST /v1/drivers/{id}/offers/{offerId}/accept | /decline
 GET  /v1/drivers/nearby?lat=&lng=&radiusKm=   debug/inspection endpoint
 ```
 
-Returning `202` rather than blocking until a match is the key latency decision: the API's p99 stays
-in the tens of milliseconds regardless of how long matching takes, and matching load can never cause
-request timeouts. Clients poll `GET /v1/rides/{id}` or subscribe to a rider WebSocket for push.
+返回 `202` 而非阻塞到匹配完成，是关键的延迟决策：无论匹配耗时多久，API 的 p99 都保持在几十毫秒量级，匹配负载也永远不会导致请求超时。客户端轮询 `GET /v1/rides/{id}`，或订阅乘客 WebSocket 获取推送。
 
-### 3.3 Matching Engine
+### 3.3 匹配引擎（Matching Engine）
 
-**Responsibility:** turn a `ride.requested` event into a driver assignment.
+**职责：** 把一个 `ride.requested` 事件转化为一次司机分配。
 
-Runs as a Kafka consumer group. Partition count (12) sets the maximum useful parallelism; each
-partition is processed in order, and requests for different rides are independent, so scaling out is
-adding instances until partitions run out.
+以 Kafka 消费者组方式运行。分区数（12）决定了最大有效并行度；每个分区按序处理，不同行程的请求彼此独立，因此水平扩容就是增加实例，直到分区耗尽。
 
-**Algorithm per request:**
+**每个请求的算法：**
 
 ```
 for radiusKm in [2.0, 3.2, 5.0]:                     # expanding search
@@ -151,8 +129,7 @@ for radiusKm in [2.0, 3.2, 5.0]:                     # expanding search
 publish ride.unmatched.v1                             # 30s SLA exhausted
 ```
 
-**Scoring.** Nearest-by-line-distance is a weak proxy for nearest-by-time, so candidates are ranked
-on a composite:
+**打分。** 按直线距离算“最近”是“按耗时最近”的弱代理，因此候选者按一个复合分数排序：
 
 ```
 score = w1 * normalizedEtaSeconds          # haversine / class-average speed
@@ -161,66 +138,44 @@ score = w1 * normalizedEtaSeconds          # haversine / class-average speed
       + w4 * idleTimePenalty               # fairness: favor the longest-waiting driver
 ```
 
-Weights are configuration, not constants in code, so the trade-off between rider wait time and driver
-fairness is tunable without redeploying.
+权重是配置而非代码中的常量，因此乘客等待时间与司机公平性之间的权衡可以在不重新部署的情况下调整。
 
-**Documented extension:** the greedy loop above is locally optimal per request. Under high demand
-density, batching requests into 2-second windows and solving the assignment as a bipartite matching
-problem (Hungarian algorithm) measurably reduces mean pickup time. Noted as a future benchmark rather
-than claimed as implemented.
+**已文档化的扩展：** 上述贪心循环对单个请求是局部最优的。在高需求密度下，把请求按 2 秒窗口分批，并将分配问题作为二部图匹配（bipartite matching）求解（匈牙利算法），可显著降低平均接驾时间。此处仅作为未来的基准测试记录，不声称已实现。
 
-### 3.4 Trip Service
+### 3.4 行程服务（Trip Service）
 
-Owns the trip state machine and Postgres. Every transition is validated against an explicit
-transition table; an illegal transition throws rather than being coerced. Each successful transition
-writes a `trip_events` row (append-only audit log), and a transition that downstream consumers act on
-also writes an `outbox` row in the **same transaction** as the trip update.
+拥有行程状态机和 Postgres。每次流转都对照一张显式的流转表校验；非法流转直接抛出异常而不是被强行纠正。每次成功的流转都会写入一行 `trip_events`（只追加的审计日志），而下游消费者需要响应的流转，还会在与行程更新**同一个事务**中写入一行 `outbox`。
 
-Two inputs, and the split matters. From Kafka it consumes `ride.matched.v1` and makes the assignment
-durable — this is the write the `uniq_driver_active_trip` index arbitrates, and the only place in the
-system where that guarantee can fire. Over HTTP it serves the four lifecycle transitions
-(`accept`, `start`, `complete`, `cancel`) that a driver or rider drives directly.
+两个输入，且这一拆分很重要。从 Kafka 它消费 `ride.matched.v1` 并使分配持久化——这正是 `uniq_driver_active_trip` 索引所仲裁的写入，也是系统中唯一会让该保证生效的地方。通过 HTTP 它服务于由司机或乘客直接驱动的四个生命周期流转（`accept`、`start`、`complete`、`cancel`）。
 
-**It is also where drivers re-enter the pool.** A claim is a driver withdrawn from matching, and
-every terminal transition releases it — after the Postgres commit, never before. Two loops back that
-up: the outbox drain (200 ms) and a claim reconciler (30 s) that releases claims Postgres says no
-trip is holding. The reconciler only considers claims with no TTL, which is a condition that only
-`markOnTrip` produces; a claim still carrying one is either an offer in flight or something that will
-expire by itself, and freeing either would take a driver from a match about to land.
+**这里也是司机重回司机池的地方。** 认领意味着一名司机被撤出匹配，而每个终态流转都会释放它——在 Postgres 提交之后，绝不在之前。有两道回路保障这一点：发件箱清空（200 ms）和一个认领对账器（30 s），后者释放 Postgres 认为没有行程持有的认领。该对账器只考虑没有 TTL 的认领，而这一条件只有 `markOnTrip` 会产生；仍带 TTL 的认领要么是一个在途报价，要么会自行过期，释放其中任何一种都会把一名司机从一桩即将落地的匹配中夺走。
 
-Schema ownership: the migrations live in `libs/schema`, not in either service. Two services write
-these tables now, and a schema kept inside one of its consumers is a schema that consumer can change
-without the other noticing. Both run Flyway from the identical set; Flyway's advisory lock makes the
-concurrent startup safe.
+Schema 归属：迁移文件位于 `libs/schema`，而不是任何一端服务里。现在有两个服务写这些表，而一份留在其某个消费者内部的 schema，意味着该消费者可以在另一方毫无察觉的情况下改动它。两者都从完全相同的一套文件运行 Flyway；Flyway 的咨询锁使并发启动是安全的。
 
-### 3.5 Notification & Billing Services
+### 3.5 通知与计费服务（Notification & Billing Services）
 
-Two separate consumer groups on the same topics. They exist to *prove* decoupling: killing either one
-must not affect matching latency at all, and on restart they replay from their committed offset with
-no lost work. The load test explicitly includes a "kill the notification service mid-run" step.
+同一组主题上的两个独立消费者组。它们的存在是为了*证明*解耦：杀掉其中任何一个都不得影响匹配延迟，且重启后从各自已提交的 offset 重放，不丢失任何工作。负载测试明确包含“在运行中途杀掉通知服务”这一步。
 
 ---
 
-## 4. Data Design
+## 4. 数据设计
 
-### 4.1 Redis key space
+### 4.1 Redis 键空间
 
-| Key | Type | Contents | TTL |
+| 键 | 类型 | 内容 | TTL |
 |---|---|---|---|
-| `geo:drivers:{city}` | GEO (zset) | member = driverId, score = geohash | — |
-| `driver:{id}:state` | Hash | `status`, `vehicleClass`, `lastSeenAt`, `tripId`, `fence` | 60 s, refreshed |
-| `driver:seen:{city}` | ZSET | score = lastSeenAt epoch ms — reaper input | — |
-| `claim:{driverId}` | String | offerToken of the current holder | 10 s |
-| `fence:counter` | String | monotonic `INCR` source for fencing tokens | — |
-| `offer:{offerId}` | Hash | rideId, driverId, expiresAt | 15 s |
+| `geo:drivers:{city}` | GEO (zset) | member = driverId，score = geohash | — |
+| `driver:{id}:state` | Hash | `status`、`vehicleClass`、`lastSeenAt`、`tripId`、`fence` | 60 s，持续刷新 |
+| `driver:seen:{city}` | ZSET | score = lastSeenAt 的 epoch 毫秒——清理器的输入 | — |
+| `claim:{driverId}` | String | 当前持有者的 offerToken | 10 s |
+| `fence:counter` | String | 围栏令牌（fencing token）的单调 `INCR` 来源 | — |
+| `offer:{offerId}` | Hash | rideId、driverId、expiresAt | 15 s |
 
-`{city}` is a hash tag so all keys for a city land on one Redis Cluster slot, keeping `GEOSEARCH`
-single-node and Lua scripts (which cannot span slots) valid.
+`{city}` 是一个 hash tag，使一个城市的所有键落在同一个 Redis Cluster slot 上，从而保持 `GEOSEARCH` 单节点执行，并让 Lua 脚本（无法跨 slot）保持有效。
 
-**Driver status:** `OFFLINE → AVAILABLE → RESERVED → ON_TRIP → AVAILABLE`. `RESERVED` is the
-short-lived state between winning a claim and the driver accepting or the offer expiring.
+**司机状态：** `OFFLINE → AVAILABLE → RESERVED → ON_TRIP → AVAILABLE`。`RESERVED` 是从赢得认领到司机接受、或报价过期之间的短暂状态。
 
-### 4.2 The claim script (`claim.lua`)
+### 4.2 认领脚本（`claim.lua`）
 
 ```lua
 -- KEYS[1] = driver:{id}:state   KEYS[2] = claim:{id}   KEYS[3] = fence:counter
@@ -237,10 +192,9 @@ redis.call('HSET', KEYS[1], 'status', 'RESERVED', 'fence', fence)
 return {1, fence}
 ```
 
-Redis runs Lua atomically on its single command thread: no other client observes or mutates the state
-between the check and the set. This is what makes the fast path correct without a lock protocol.
+Redis 在其单一命令线程上原子地执行 Lua：在检查与写入之间没有其他客户端能观察或修改状态。这正是让快速路径无需锁协议也能保持正确的关键。
 
-### 4.3 PostgreSQL schema (essentials)
+### 4.3 PostgreSQL schema（核心部分）
 
 ```sql
 CREATE TABLE trips (
@@ -297,70 +251,58 @@ CREATE TABLE trip_events (          -- append-only audit trail
 );
 ```
 
-`uniq_driver_active_trip` is the line that makes the headline claim true. Everything in Redis is an
-optimization layered on top of it. If a reviewer only reads one line of SQL in this repository, this
-is the one.
+`uniq_driver_active_trip` 是让标题级主张成立的那一行。Redis 中的一切都是叠加在其之上的优化。如果评审者只读本仓库中的一行 SQL，就是这一行。
 
-**Pessimistic locking**, where the brief calls for it, is used for driver-initiated accept/decline:
-`SELECT ... FROM trips WHERE id = ? FOR UPDATE` serializes concurrent accept and cancel on the same
-trip. It is the right tool for a short, contended, single-row transaction — and the wrong tool for
-the matching search, which is why matching uses the Redis fast path instead.
+**悲观锁（pessimistic locking）** 在需求说明书要求之处用于司机发起的 accept/decline：`SELECT ... FROM trips WHERE id = ? FOR UPDATE` 将同一行程上的并发 accept 与 cancel 串行化。对一个短暂、有争用、单行的事务来说它是正确的工具——而对匹配搜索来说是错误的工具，这正是匹配改走 Redis 快速路径的原因。
 
 ---
 
-## 5. Failure Modes
+## 5. 故障模式
 
-Designing for the happy path is not a design. Each row is exercised by an integration test.
+只为正常路径做设计不算设计。下表每一行都有一条集成测试覆盖。
 
-| Failure | Effect | Mitigation |
+| 故障 | 影响 | 缓解措施 |
 |---|---|---|
-| Redis dies | No geo index; matching halts | Postgres constraint still prevents corruption. API stays up returning `503` for matching; drivers reconnect and repopulate the index in ~1 s of frames. AOF `everysec` for warm restart. |
-| Claim lease expires mid-assignment | Another worker may claim the same driver | Fencing token: the stale worker's DB write carries an older token and is rejected; the unique index is the backstop. |
-| Kafka unavailable | Ride requests cannot be enqueued | API returns `503` with `Retry-After` rather than accepting work it cannot process. Location mirroring degrades silently by design. |
-| Consumer crash mid-processing | Event redelivered | Consumers are idempotent on event ID; assignment is naturally idempotent via the unique index. |
-| Postgres primary failover | Writes fail for a few seconds | Bounded retries with jittered backoff; the outbox guarantees nothing published is lost. |
-| Driver goes offline while `RESERVED` | Ride would stall | Offer TTL (8 s) expires, claim is released, matching resumes with the next candidate. |
-| Ghost driver (half-open socket) | Matched to an unreachable driver | 30 s heartbeat reaper evicts them; offer expiry catches the narrow window. |
-| Poison message | Consumer stuck in a redelivery loop | 3 retries with backoff, then routed to `*.dlt` with full context; consumer advances. |
-| Thundering herd on reconnect | Ingest spike after a deploy | Client-side jittered reconnect plus a connection rate limiter at the edge. |
+| Redis 宕机 | 没有地理索引；匹配停摆 | Postgres 约束仍能防止数据损坏。API 对匹配请求保持可用并返回 `503`；司机重连并在约 1 s 的帧内重建索引。AOF `everysec` 支持热重启。 |
+| 认领租约在分配中途过期 | 另一个 worker 可能认领同一司机 | 围栏令牌：过期 worker 的 DB 写入携带更旧的令牌而被拒绝；唯一部分索引是最后兜底。 |
+| Kafka 不可用 | 叫车请求无法入队 | API 返回 `503` 并带 `Retry-After`，而不是接收它无法处理的工作。位置镜像按设计静默降级。 |
+| 消费者处理中途崩溃 | 事件被重新投递 | 消费者按事件 ID 幂等；分配经由唯一部分索引天然幂等。 |
+| Postgres 主库故障切换 | 写入失败数秒 | 有界重试 + 带抖动的退避；发件箱保证任何已发布内容不丢失。 |
+| 司机在 `RESERVED` 期间掉线 | 行程会卡住 | 报价 TTL（8 s）到期，认领被释放，匹配继续下一个候选者。 |
+| 幽灵司机（半开套接字） | 被匹配到一名不可达的司机 | 30 s 心跳清理器将其驱逐；报价过期兜住那扇窄窗口。 |
+| 毒消息 | 消费者陷入重新投递循环 | 退避重试 3 次，随后连同完整上下文路由到 `*.dlt`；消费者继续前进。 |
+| 重连时的惊群效应 | 部署后的接入尖峰 | 客户端带抖动的重连，加上边缘处的连接速率限制器。 |
 
 ---
 
-## 6. Testing Strategy
+## 6. 测试策略
 
-| Layer | Scope | Tooling |
+| 层级 | 范围 | 工具 |
 |---|---|---|
-| Unit | Domain invariants, state machine, scoring — no infra | JUnit 5, AssertJ |
-| Integration | Real Redis / Postgres / Kafka per test class | Testcontainers |
-| **Concurrency** | 200 threads race for 1 driver; assert exactly 1 wins | JUnit + `CountDownLatch` barrier |
-| **Idempotency** | 50 parallel retries of one key produce 1 ride | Testcontainers |
-| Contract | Event schemas are backward compatible | Schema compatibility check in CI |
-| Resilience | Kill Redis / Kafka mid-run, assert recovery | Testcontainers + `docker pause` |
-| Load | Full-stack, 10k drivers + 5k riders | k6 + simulator |
+| 单元 | 领域不变量、状态机、打分——不碰基础设施 | JUnit 5、AssertJ |
+| 集成 | 每个测试类使用真实的 Redis / Postgres / Kafka | Testcontainers |
+| **并发** | 200 个线程争抢 1 名司机；断言恰好 1 个胜出 | JUnit + `CountDownLatch` 屏障 |
+| **幂等** | 同一幂等键 50 个并行重试只产生 1 个行程 | Testcontainers |
+| 契约 | 事件 schema 向后兼容 | CI 中的 schema 兼容性检查 |
+| 韧性 | 运行中途杀掉 Redis / Kafka，断言恢复 | Testcontainers + `docker pause` |
+| 负载 | 全栈，10k 司机 + 5k 乘客 | k6 + 模拟器 |
 
-The concurrency test is the flagship: a `CountDownLatch` releases N threads simultaneously against a
-single available driver, then asserts `SELECT count(*) FROM trips WHERE driver_id = ? AND status IN
-(...)` equals 1 and that exactly one thread received a success. It is a test that fails loudly on any
-regression in the claim path.
+并发测试是旗舰：一个 `CountDownLatch` 同时放行 N 个线程去争抢唯一一名可用司机，然后断言 `SELECT count(*) FROM trips WHERE driver_id = ? AND status IN (...)` 等于 1，且恰好只有一个线程收到成功。这是一个在认领路径上出现任何回归时都会大声失败的测试。
 
 ---
 
-## 7. Roadmap
+## 7. 路线图
 
-| Phase | Deliverable |
+| 阶段 | 交付物 |
 |---|---|
-| 0 | Design docs, ADRs, architecture diagram ✅ |
-| 1 | Compose infra + Maven multi-module skeleton + health checks ✅ |
-| 2 | Domain model, trip state machine, unit tests ✅ |
-| 3 | Location Service: WebSocket ingestion → Redis GEO ✅ |
-| 4 | Dispatch API + idempotency + Postgres schema ✅ |
-| 5 | Matching Engine + claim protocol + concurrency tests ✅ |
-| 6 | Kafka topology, outbox publisher, notification/billing consumers ✅ |
-| 7 | Prometheus + Grafana dashboards ✅ |
-| 8 | Simulator + k6 load harness, published results |
+| 0 | 设计文档、ADR、架构图 ✅ |
+| 1 | Compose 基础设施 + Maven 多模块骨架 + 健康检查 ✅ |
+| 2 | 领域模型、行程状态机、单元测试 ✅ |
+| 3 | 位置服务：WebSocket 接入 → Redis GEO ✅ |
+| 4 | 派单 API + 幂等 + Postgres schema ✅ |
+| 5 | 匹配引擎 + 认领协议 + 并发测试 ✅ |
+| 6 | Kafka 拓扑、发件箱发布器、通知/计费消费者 ✅ |
+| 7 | Prometheus + Grafana 仪表盘 ✅ |
+| 8 | 模拟器 + k6 负载测试架，发布结果 |
 
-Between phases 7 and 8: the trip lifecycle was made reachable. The state machine, the claim release,
-and the `RideMatched` consumer that persists an assignment had all been built and none were wired to
-anything a caller could invoke — so no trip ever left `REQUESTED`, the unique index was never
-exercised in a running system, and no driver was ever handed back. Load testing an engine whose
-driver pool drains monotonically would have measured the leak rather than the design.
+在第 7 与第 8 阶段之间：行程生命周期变得可触达。状态机、认领释放，以及那个把分配持久化的 `RideMatched` 消费者早已全部建成，却没有一个被接到任何调用方可触达的东西上——因此从未有行程离开过 `REQUESTED`，唯一部分索引从未在一个运行中的系统中被真正行使过，也从未有司机被交还给池中。对一个司机池单调流失的引擎做负载测试，测到的将是那道泄漏，而不是这个设计。

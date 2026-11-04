@@ -15,24 +15,20 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.UUID;
 
 /**
- * The trip lifecycle over HTTP.
+ * 通过 HTTP 暴露行程生命周期。
  *
- * <p>Four transitions, each its own endpoint rather than a {@code PATCH} that takes a target
- * status. The difference matters: {@code POST /accept} can only ever mean one transition, so
- * the set of legal requests is the set of legal transitions, and an invalid move is rejected
- * by routing rather than by validating a string against the state machine. It also keeps the
- * URLs honest about being actions, which is what they are — completing a trip is not an edit
- * to a status field.
+ * <p>四个转换，各自一个端点，而不是用一个接收目标状态的 {@code PATCH}。这个区别很重要：
+ * {@code POST /accept} 永远只可能表示一个转换，因此合法请求的集合就是合法转换的集合，一次
+ * 非法迁移由路由拒绝，而不是把一个字符串拿去和状态机做校验。这也让 URL 诚实地表达自己是
+ * 动作——完成一趟行程并不是编辑某个状态字段。
  *
- * <p>Synchronous, unlike ride creation. Ride requests return {@code 202} because matching takes
- * as long as it takes and nobody should hold a socket open for it; these transitions are a
- * single row update and the caller genuinely needs to know whether it won. A driver tapping
- * accept must be told immediately if someone else got there first.
+ * <p>与叫车请求不同，这里是同步的。叫车请求返回 {@code 202}，因为匹配耗时不定，也不该有人
+ * 为它一直占着连接；而这些转换只是一次单行更新，调用方确实需要知道它有没有赢。司机点了
+ * 接受，如果别人先到，必须立刻告诉他。
  *
- * <p>No idempotency keys here, deliberately. The state machine already provides the property
- * they would buy: a repeated {@code accept} on an {@code ACCEPTED} trip is rejected by the
- * transition table, not applied twice. Adding a key store would be machinery guarding an
- * invariant that is enforced a layer down.
+ * <p>这里刻意不使用幂等键。状态机已经提供了它们本要买到的性质：对一趟已 {@code ACCEPTED}
+ * 的行程重复 {@code accept}，会被转换表拒绝，而不是被执行两次。再加一个键存储，就是在为
+ * 一个已经在更下层强制的不变量添加机器。
  */
 @RestController
 @RequestMapping("/v1/trips")
@@ -44,21 +40,21 @@ public class TripController {
         this.lifecycle = lifecycle;
     }
 
-    /** The driver accepted the offer. {@code OFFERED -> ACCEPTED}. */
+    /** 司机接受了报价。{@code OFFERED -> ACCEPTED}。 */
     @PostMapping("/{rideId}/accept")
     public ResponseEntity<TripResponseDto> accept(@PathVariable UUID rideId) {
         lifecycle.accept(new RideId(rideId));
         return current(rideId);
     }
 
-    /** The rider is in the vehicle. {@code ACCEPTED -> IN_PROGRESS}. */
+    /** 乘客已上车。{@code ACCEPTED -> IN_PROGRESS}。 */
     @PostMapping("/{rideId}/start")
     public ResponseEntity<TripResponseDto> start(@PathVariable UUID rideId) {
         lifecycle.start(new RideId(rideId));
         return current(rideId);
     }
 
-    /** The rider was dropped off. {@code IN_PROGRESS -> COMPLETED}, and the driver is freed. */
+    /** 乘客已送达下车。{@code IN_PROGRESS -> COMPLETED}，司机被释放。 */
     @PostMapping("/{rideId}/complete")
     public ResponseEntity<TripResponseDto> complete(@PathVariable UUID rideId) {
         lifecycle.complete(new RideId(rideId));
@@ -66,10 +62,10 @@ public class TripController {
     }
 
     /**
-     * The trip was called off. Terminal, and the driver is freed.
+     * 行程被取消。终态，司机被释放。
      *
-     * <p>Rejected once the trip is {@code IN_PROGRESS} — see {@code TripStatus}. That comes
-     * back as a 409 naming the state, not a silent no-op.
+     * <p>行程一旦进入 {@code IN_PROGRESS} 即被拒绝——见 {@code TripStatus}。这会被作为
+     * 指名该状态的 409 返回，而不是一个静默的空操作。
      */
     @PostMapping("/{rideId}/cancel")
     public ResponseEntity<TripResponseDto> cancel(@PathVariable UUID rideId,
@@ -84,12 +80,11 @@ public class TripController {
     }
 
     /**
-     * Reads the trip back after the transition.
+     * 在转换之后重新读取行程。
      *
-     * <p>A second read rather than returning the in-memory aggregate. It costs a round trip on
-     * an already-committed request and buys the guarantee that the response describes what is
-     * actually stored — including anything a concurrent writer did in between, which is
-     * precisely what a caller checking the result is asking about.
+     * <p>再读一次，而不是直接返回内存中的聚合。它在一次已经提交的请求上多花一次往返，换来
+     * 的保证是：响应描述的是实际存储的内容——包括期间并发写入者做的任何事，而这恰恰是检查
+     * 结果的调用方所关心的。
      */
     private ResponseEntity<TripResponseDto> current(UUID rideId) {
         RideId id = new RideId(rideId);

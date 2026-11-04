@@ -16,9 +16,9 @@
   <description>Pure domain model and ports. No framework dependencies — see ADR-0001.</description>
 
   <!--
-    The compile-scope dependency list is EMPTY on purpose and must stay that way.
-    Adding Spring, Jackson, JPA or Kafka here is the exact rot ArchitectureTest exists
-    to catch; that test fails the build rather than relying on discipline.
+    compile 范围的依赖列表为空是有意为之，并且必须保持为空。
+    在这里加入 Spring、Jackson、JPA 或 Kafka，正是 ArchitectureTest 要抓的那种
+    腐化；该测试直接让构建失败，而不是依赖自律。
   -->
   <dependencies>
     <dependency>

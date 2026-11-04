@@ -20,14 +20,13 @@ import java.util.HexFormat;
 import java.util.Optional;
 
 /**
- * Creates a ride request, exactly once per idempotency key (ADR-0005).
+ * 按每个幂等键恰好创建一次叫车请求（ADR-0005）。
  *
- * <p>The API is deliberately thin: it validates, persists, and returns. It performs no
- * matching, so its latency is predictable and independent of how long dispatch takes. That is
- * what keeps the p99 API budget (120ms) separate from the p99 match budget (500ms).
+ * <p>这个 API 刻意做得很薄：校验、持久化、返回。它不做任何匹配，所以延迟可预测，且与派单
+ * 耗时无关。这正是让 p99 API 预算（120ms）与 p99 匹配预算（500ms）相互独立的原因。
  *
- * <p>Plain constructor injection, no Spring annotations — the whole algorithm is unit-testable
- * against fakes, including the concurrent-retry race.
+ * <p>普通构造器注入，没有 Spring 注解——整个算法都可以针对 fake 做单元测试，包括并发重试
+ * 竞争。
  */
 public class RequestRideUseCase {
 
@@ -41,10 +40,9 @@ public class RequestRideUseCase {
     private final Counter keyReuse;
 
     /**
-     * No {@code OutboxWriter} here on purpose: the event is written by
-     * {@link TripRepository#insertWithEvent} so it shares the trip's transaction. Injecting the
-     * writer separately would invite a caller to append outside that boundary, which is exactly
-     * the dual-write the outbox exists to prevent.
+     * 刻意不在这里注入 {@code OutboxWriter}：事件由 {@link TripRepository#insertWithEvent}
+     * 写入，从而与行程共享同一事务。单独注入写入器会诱使调用方在该边界之外追加，而这正是
+     * 发件箱要防止的双重写入。
      */
     public RequestRideUseCase(TripRepository trips,
                               IdempotencyStore idempotency,
@@ -65,10 +63,10 @@ public class RequestRideUseCase {
     }
 
     /**
-     * Handles one ride request.
+     * 处理一条叫车请求。
      *
-     * @param command      what the rider asked for
-     * @param idempotencyKey client-generated key; required
+     * @param command     乘客提出的请求
+     * @param idempotencyKey 客户端生成的键；必填
      */
     public RideRequestOutcome handle(RequestRideCommand command, String idempotencyKey) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
@@ -77,16 +75,15 @@ public class RequestRideUseCase {
 
         String requestHash = hash(command);
 
-        // One atomic statement decides the winner. Everything below is reacting to that
-        // decision, never re-checking it.
+        // 一条原子语句决定赢家。下面的一切都只是对那个决定的反应，绝不再重新检查它。
         if (idempotency.tryClaim(idempotencyKey, requestHash)) {
             return createTrip(command, idempotencyKey);
         }
 
         Optional<IdempotencyRecord> existing = idempotency.find(idempotencyKey);
         if (existing.isEmpty()) {
-            // The key was claimed and then expired or was released between the two calls.
-            // Rare, and safe to treat as a fresh attempt.
+            // 这个键被抢占后，在两次调用之间过期或被释放了。这种情况罕见，按全新尝试处理
+            // 是安全的。
             return idempotency.tryClaim(idempotencyKey, requestHash)
                     ? createTrip(command, idempotencyKey)
                     : RideRequestOutcome.inProgress();
@@ -95,8 +92,8 @@ public class RequestRideUseCase {
         IdempotencyRecord record = existing.get();
 
         if (!record.matches(requestHash)) {
-            // The same key for a different request is a client bug. Replaying the first
-            // response would silently discard this request; failing loudly is kinder.
+            // 同一个键用于不同请求是客户端 bug。重放第一次的响应会悄悄丢弃这个请求；
+            // 大声失败更仁慈。
             keyReuse.increment();
             return RideRequestOutcome.keyReuse();
         }
@@ -113,7 +110,7 @@ public class RequestRideUseCase {
                 record.body().orElse(null));
     }
 
-    /** Reads a trip back. The controller depends on this layer, never on the repository. */
+    /** 读回一趟行程。控制器依赖这一层，绝不直接依赖仓库。 */
     public Optional<Trip> findById(RideId rideId) {
         return trips.findById(rideId);
     }
@@ -129,9 +126,9 @@ public class RequestRideUseCase {
                     command.vehicleClass(),
                     clock);
 
-            // Trip row and outbox row commit together (ADR-0003). Publishing to Kafka here
-            // instead would be the dual-write bug: a crash between the two would leave either
-            // an event for a trip that does not exist, or a trip nobody is told about.
+            // 行程行与发件箱行一起提交（ADR-0003）。如果改在这里直接发布到 Kafka，就会
+            // 犯下双重写入的 bug：两次写入之间崩溃，要么留下一个指向不存在行程的事件，
+            // 要么留下一趟无人知晓的行程。
             trips.insertWithEvent(trip, new RideRequested(
                     java.util.UUID.randomUUID(),
                     rideId.value(),
@@ -145,20 +142,18 @@ public class RequestRideUseCase {
             created.increment();
             return RideRequestOutcome.accepted(rideId);
         } catch (RuntimeException e) {
-            // Release the claim so the client's retry is a genuine retry rather than a
-            // permanent 409. Without this, one transient database error would poison that
-            // key for its whole 24-hour lifetime.
+            // 释放抢占，让客户端重试成为真正的重试而不是永久的 409。没有这一步，一次
+            // 暂时性的数据库错误就会在这个键整整 24 小时的生命期里把它毒化。
             idempotency.release(idempotencyKey);
             throw e;
         }
     }
 
     /**
-     * SHA-256 over the semantically meaningful fields.
+     * 对语义上有意义的字段计算 SHA-256。
      *
-     * <p>Hashing the parsed command rather than the raw bytes means whitespace and JSON field
-     * ordering do not change the hash — two byte-different encodings of the same request are
-     * correctly treated as the same request.
+     * <p>对解析后的命令而非原始字节做哈希，意味着空白和 JSON 字段顺序不影响哈希——同一个
+     * 请求的两种字节不同的编码会被正确地当作同一个请求。
      */
     private String hash(RequestRideCommand command) {
         String canonical = "%s|%s,%s|%s,%s|%s".formatted(
@@ -174,7 +169,7 @@ public class RequestRideUseCase {
         }
     }
 
-    /** What the rider asked for, after parsing and validation. */
+    /** 乘客提出的请求，经过解析与校验。 */
     public record RequestRideCommand(
             RiderId riderId,
             Coordinates pickup,

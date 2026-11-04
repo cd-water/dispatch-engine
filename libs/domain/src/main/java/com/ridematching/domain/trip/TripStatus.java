@@ -7,57 +7,57 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * States a trip can occupy, and the only transitions permitted between them.
+ * 行程可以处于的状态，以及它们之间唯一被允许的转换。
  *
- * <p>The transition table is declared once, here, rather than scattered across {@code if}
- * statements in service code. Every guard in {@link Trip} consults this, so "what is legal"
- * has a single definition that can be tested exhaustively.
+ * <p>转换表只在这里声明一次，而不是散落在服务代码的各个 {@code if}
+ * 语句中。{@link Trip} 里的每一处守卫都参照它，因此“什么才是合法的”
+ * 只有一个可以被穷尽测试的定义。
  *
  * <pre>
  *   REQUESTED ──▶ MATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ IN_PROGRESS ──▶ COMPLETED
  *                    │  ▲         │
- *                    │  └─────────┘  offer declined or expired: try the next candidate
+ *                    │  └─────────┘  报价被拒绝或已过期：尝试下一位候选司机
  *                    ▼
- *                UNMATCHED         radius exhausted or the 30s SLA elapsed
+ *                UNMATCHED         半径已用尽或 30 秒 SLA 已到期
  * </pre>
  *
- * <p><strong>IN_PROGRESS cannot be cancelled.</strong> Once a rider is in the vehicle the
- * trip must reach {@link #COMPLETED}; aborting mid-journey is a different business process
- * with its own fare implications, not a cancellation. This mirrors the state diagram in the
- * README and is deliberately restrictive — a real platform would add a distinct
- * {@code ABORTED} state rather than widening cancellation.
+ * <p><strong>IN_PROGRESS 不可以被取消。</strong>乘客一旦上车，
+ * 行程就必须到达 {@link #COMPLETED}；在旅程中途中止是另一套业务流程，
+ * 有它自己的计费含义，并不算取消。这与 README 中的状态图保持一致，并且刻意收得很紧——
+ * 一个真实的平台会增加一个独立的
+ * {@code ABORTED} 状态，而不是放宽取消的口径。
  */
 public enum TripStatus {
 
-    /** Rider has asked for a trip; nothing has been dispatched yet. */
+    /** 乘客已请求行程；尚未调度任何东西。 */
     REQUESTED,
 
-    /** The matching engine is searching for and claiming candidate drivers. */
+    /** 匹配引擎正在搜索并认领候选司机。 */
     MATCHING,
 
-    /** A driver has been claimed and holds an offer that expires shortly. */
+    /** 已认领一位司机，其持有的报价很快就会过期。 */
     OFFERED,
 
-    /** The driver accepted and is en route to the pickup point. */
+    /** 司机已接受，正在前往上车点。 */
     ACCEPTED,
 
-    /** Rider is in the vehicle. */
+    /** 乘客已在车内。 */
     IN_PROGRESS,
 
-    /** Trip finished normally. Terminal. */
+    /** 行程正常结束。终态。 */
     COMPLETED,
 
-    /** Trip was called off before it began. Terminal. */
+    /** 行程在开始之前被取消。终态。 */
     CANCELLED,
 
-    /** No driver could be found inside the SLA window. Terminal. */
+    /** 在 SLA 时间窗口内未能找到司机。终态。 */
     UNMATCHED;
 
     private static final Map<TripStatus, Set<TripStatus>> ALLOWED_TRANSITIONS;
 
     static {
-        // Enum constants are fully constructed before static initialisers run, so
-        // referencing them here is safe.
+        // 枚举常量在静态初始化器运行之前就已完全构造完毕，因此
+        // 在这里引用它们是安全的。
         Map<TripStatus, Set<TripStatus>> allowed = new EnumMap<>(TripStatus.class);
         allowed.put(REQUESTED, EnumSet.of(MATCHING, CANCELLED));
         allowed.put(MATCHING, EnumSet.of(OFFERED, UNMATCHED, CANCELLED));
@@ -68,16 +68,16 @@ public enum TripStatus {
         allowed.put(CANCELLED, EnumSet.noneOf(TripStatus.class));
         allowed.put(UNMATCHED, EnumSet.noneOf(TripStatus.class));
 
-        // Each value set must be wrapped individually. Collections.unmodifiableMap only
-        // freezes the map itself — the EnumSets inside stay mutable, and this table is
-        // static shared state, so a single stray add() would silently rewrite the state
-        // machine for the entire JVM. TripStatusTest proves this is now closed.
+        // 每个值集合都必须被单独包裹。Collections.unmodifiableMap 只会
+        // 冻结映射本身——里面的 EnumSet 依然是可变的，而这张表是
+        // 静态共享状态，因此一次失手的 add() 就会悄悄改写整个 JVM 的状态机。
+        // TripStatusTest 证明了这一漏洞如今已被堵上。
         Map<TripStatus, Set<TripStatus>> frozen = new EnumMap<>(TripStatus.class);
         allowed.forEach((state, targets) -> frozen.put(state, Collections.unmodifiableSet(targets)));
         ALLOWED_TRANSITIONS = Collections.unmodifiableMap(frozen);
     }
 
-    /** Whether a trip in this state may move to {@code target}. */
+    /** 处于该状态的行程是否可以迁移到 {@code target}。 */
     public boolean canTransitionTo(TripStatus target) {
         if (target == null) {
             return false;
@@ -85,31 +85,30 @@ public enum TripStatus {
         return ALLOWED_TRANSITIONS.get(this).contains(target);
     }
 
-    /** States reachable from this one in a single step. Never null; empty when terminal. */
+    /** 从当前状态一步可达的状态。永不为 null；终态时为空。 */
     public Set<TripStatus> allowedTargets() {
         return ALLOWED_TRANSITIONS.get(this);
     }
 
-    /** A terminal state has no outgoing transitions; the trip is finished for good. */
+    /** 终态没有任何向外的转换；行程就此彻底结束。 */
     public boolean isTerminal() {
         return ALLOWED_TRANSITIONS.get(this).isEmpty();
     }
 
     /**
-     * Whether a trip in this state holds a driver.
+     * 处于该状态的行程是否持有司机。
      *
-     * <p>This set is exactly the predicate of the {@code uniq_driver_active_trip} partial
-     * index in PostgreSQL — the constraint that makes double-assignment physically
-     * impossible (ADR-0004). The two must agree: a state that holds a driver in the domain
-     * but sits outside the index predicate is a hole in the guarantee.
+     * <p>这个集合恰好就是 PostgreSQL 中 {@code uniq_driver_active_trip} 唯一部分索引
+     * 的谓词——正是这条约束让重复指派在物理上
+     * 成为不可能（ADR-0004）。两者必须一致：一个在领域里持有司机、
+     * 却落在索引谓词之外的状态，就是这个保证上的一个漏洞。
      *
-     * <p>{@link #OFFERED} is included because the trip row is written immediately after the
-     * Redis claim succeeds and <em>before</em> the driver accepts. That is what stops a
-     * second worker inserting a competing row during the offer window; waiting until
-     * acceptance would leave the race open for the offer's whole 8-second TTL.
+     * <p>{@link #OFFERED} 被包含在内，是因为行程行会在 Redis 认领成功之后立刻写入，
+     * 并且是在司机<em>接受之前</em>。这正是阻止第二个工作节点在报价窗口内
+     * 插入竞争行的手段；若等到接受才写入，整个报价的 8 秒 TTL 期间这个竞态都会敞开着。
      *
-     * <p>Also used as an invariant check: a trip in one of these states with no assigned
-     * driver is a corrupt record, not a valid one.
+     * <p>它也被用作不变式检查：处于这些状态之一却没有指派司机的行程
+     * 是一条损坏的记录，而不是一条合法记录。
      */
     public boolean holdsDriver() {
         return this == OFFERED || this == ACCEPTED || this == IN_PROGRESS;

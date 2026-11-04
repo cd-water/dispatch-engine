@@ -10,15 +10,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * PostgreSQL-backed idempotency keys (ADR-0005).
+ * 基于 PostgreSQL 的幂等键（ADR-0005）。
  *
- * <p>Plain SQL through {@link JdbcClient} rather than JPA. The whole mechanism turns on the
- * exact semantics of one statement — {@code INSERT ... ON CONFLICT DO NOTHING} — and an ORM
- * would obscure the thing that makes it correct.
+ * <p>通过 {@link JdbcClient} 写普通 SQL，而不是 JPA。整个机制取决于一条语句的确切语义——
+ * {@code INSERT ... ON CONFLICT DO NOTHING}——而 ORM 会遮掩掉让它正确的那个东西。
  */
 public class JdbcIdempotencyStore implements IdempotencyStore {
 
-    /** How long a completed response stays replayable. */
+    /** 已完成的响应在多长时间内仍可重放。 */
     private static final Duration RETENTION = Duration.ofHours(24);
 
     private final JdbcClient jdbc;
@@ -31,12 +30,12 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
 
     @Override
     public boolean tryClaim(String key, String requestHash) {
-        // ON CONFLICT DO NOTHING makes this a single atomic decision. Two concurrent retries
-        // both execute it; exactly one reports 1 row affected. There is deliberately no
-        // SELECT first — that would open the window this exists to close.
+        // ON CONFLICT DO NOTHING 让它成为一次原子决定。两个并发重试都会执行它；恰好有一个
+        // 报告影响 1 行。这里刻意不先做 SELECT——那会打开这个机制存在的意义就是要关上的
+        // 那个窗口。
         //
-        // The WHERE clause on the DO NOTHING target also lets a claim be re-taken once the
-        // previous one has expired, so a key is not poisoned forever.
+        // DO NOTHING 目标上的 WHERE 子句还让认领可以在上一个过期后被重新取得，这样键就不会
+        // 被永久毒化。
         int inserted = jdbc.sql("""
                         INSERT INTO idempotency_keys
                             (key, request_hash, state, created_at, expires_at)
@@ -90,8 +89,8 @@ public class JdbcIdempotencyStore implements IdempotencyStore {
 
     @Override
     public void release(String key) {
-        // Only release a claim that is still IN_PROGRESS. A completed record must never be
-        // deleted by a late failure handler, or a valid stored response would vanish.
+        // 只释放仍处于 IN_PROGRESS 的认领。已完成的记录绝不能被迟到的失败处理器删除，
+        // 否则一个合法的已存储响应就消失了。
         jdbc.sql("DELETE FROM idempotency_keys WHERE key = :key AND state = 'IN_PROGRESS'")
                 .param("key", key)
                 .update();

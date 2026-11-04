@@ -1,24 +1,20 @@
-# ADR-0004: Two-layer driver claim — and why not Redlock
+# ADR-0004：两层司机认领机制——以及为什么不使用 Redlock
 
-**Status:** Accepted · **Date:** 2026-09-03
+**状态：** 已采纳 · **日期：** 2026-09-03
 
-## Context
+## 背景
 
-The system's central invariant: **a driver is assigned to at most one active ride.**
+系统的核心不变式（invariant）：**一名司机最多只能被分配到一个进行中的行程。**
 
-Under load, multiple matching workers on different instances routinely rank the same driver first —
-the nearest available driver to two riders one block apart is the same person. Between the
-`GEOSEARCH` that returns a driver and the write that assigns them, another worker can do the same
-thing. The window is milliseconds, which means it *will* be hit at 500 requests/sec.
+在负载下，不同实例上的多个匹配工作节点经常会把同一名司机排在第一位——对于相距一个街区的两名乘客（rider）来说，最近可用司机是同一个人。在返回司机的 `GEOSEARCH` 与分配该司机的写入之间，另一个工作节点可能做了同样的事。这个窗口只有几毫秒，而这意味着在 500 请求/秒的压力下它*一定会*被命中。
 
-The brief suggests Redlock or database pessimistic locking. Both were evaluated.
+需求简报建议使用 Redlock 或数据库悲观锁。两者都被评估过。
 
-## Decision
+## 决策
 
-**Two layers with different jobs.** The distributed lock is a performance optimization; the database
-constraint is the correctness guarantee.
+**两层机制，各司其职。** 分布式锁是性能优化；数据库约束才是正确性保证。
 
-### Layer 1 — Redis Lua compare-and-set (contention control)
+### 第 1 层——Redis Lua 比较并交换（compare-and-set，控制认领争用）
 
 ```lua
 if redis.call('HGET', KEYS[1], 'status') ~= 'AVAILABLE' then return {0, 'NOT_AVAILABLE'} end
@@ -29,11 +25,9 @@ redis.call('HSET', KEYS[1], 'status', 'RESERVED', 'fence', fence)
 return {1, fence}
 ```
 
-Redis executes Lua atomically on a single thread — no other client can observe or mutate the state
-between the check and the set. The loser is told in one round trip and moves to its next-best
-candidate immediately, rather than blocking, spinning, or retrying the same driver.
+Redis 在单线程上原子地执行 Lua——在检查与写入之间，没有其他客户端能观察或修改状态。落败者在一个往返内得到通知，并立即转向它的次优候选，而不是阻塞、自旋或重试同一名司机。
 
-### Layer 2 — PostgreSQL unique partial index (correctness)
+### 第 2 层——PostgreSQL 唯一部分索引（unique partial index，保证正确性）
 
 ```sql
 CREATE UNIQUE INDEX uniq_driver_active_trip
@@ -41,130 +35,77 @@ CREATE UNIQUE INDEX uniq_driver_active_trip
     WHERE status IN ('OFFERED', 'ACCEPTED', 'IN_PROGRESS');
 ```
 
-The database physically cannot store two active trips for one driver. Redis can lose its dataset, a
-lease can expire mid-flight, the network can partition, a worker can be paused by a 4-second GC — and
-the invariant still holds. A violating insert raises a constraint error, the worker releases its
-claim and moves to the next candidate. **Correctness lives where the durable state lives.**
+数据库在物理上无法为一名司机存储两个进行中的行程。Redis 可以丢失它的数据集，租约（lease）可能在执行途中过期，网络可能分区，工作节点可能被一次 4 秒的 GC 暂停——而不变式仍然成立。一次违反约束的插入会抛出约束错误，工作节点释放它的认领（claim）并转向下一个候选。**正确性存在于持久状态所在的地方。**
 
-### Fencing tokens
+### 围栏令牌（fencing token）
 
-Every claim carries a monotonic token from `INCR`. The assignment write includes it; a worker that
-stalled past its lease and wakes up late presents a token lower than the current one and is rejected.
-This closes the failure that lease-based locks silently permit: the lock expires while its holder is
-still working and still believes it holds the lock.
+每个认领都携带一个来自 `INCR` 的单调递增令牌。分配写入会带上它；一个停滞超过租约、迟到才醒来的工作节点提交的令牌低于当前值，因此会被拒绝。这堵上了基于租约的锁默默允许的那类失败：锁已过期，而持有者仍在工作并仍以为自己持有锁。
 
-### Releasing the claim
+### 释放认领
 
-A claim is a driver withdrawn from the pool, so the lifecycle has to give them back. Every terminal
-transition releases, and the release is token-checked in Lua for the same reason the claim is: a
-worker whose claim already lapsed must not be able to delete the marker of whoever legitimately took
-the driver afterwards.
+一个认领意味着一名司机被抽离了司机池，所以生命周期必须把他还回去。每个终态转换都会释放，并且释放同样在 Lua 中做令牌校验，理由与认领相同：一个认领早已失效的工作节点，不得删除后来合法接管该司机的那个人的标记。
 
-**The release happens after the Postgres commit, never before.** Postgres is the boundary, so the
-durable write is the one that decides. Releasing first would briefly advertise a driver as available
-while a committed row still held them — not a correctness problem, since the index would reject the
-competing claim, but it converts a cheap Redis rejection into an expensive database one, which is the
-exact trade the fast path exists to avoid.
+**释放发生在 Postgres 提交之后，绝不提前。** Postgres 是边界，所以由持久化写入说了算。先释放会短暂地把一名司机宣告为可用，而此时一条已提交的行仍占有着他——这不是正确性问题，因为唯一索引会拒绝竞争的认领——但它把一次廉价的 Redis 拒绝变成了昂贵的数据库拒绝，而这正是快速路径（hot path）存在的意义所要避免的那笔交换。
 
-That ordering leaves a window, and the window is not benign: acceptance calls `PERSIST` on the claim
-marker (an offer TTL measured in seconds would otherwise expire mid-journey and have the engine
-offering rides to a driver already carrying a passenger), so a crash between the commit and the
-release strands that driver with no TTL to rescue them. The reconciler below closes it.
+这个顺序留下了一个窗口，而且这个窗口并非无害：接受行程会对认领标记调用 `PERSIST`（否则以秒计的 offer TTL 会在旅程中途过期，让引擎向一名已经载着乘客的司机继续派单），因此在提交与释放之间崩溃会让该司机被困住，没有任何 TTL 来解救他。下文的协调器（reconciler）堵上了这个窗口。
 
-### Optimistic locking, not pessimistic
+### 乐观锁（optimistic locking），而非悲观锁
 
-Lifecycle transitions — accept, start, complete, cancel — use a `version` column and an
-`UPDATE ... WHERE version = :expected`, not `SELECT ... FOR UPDATE`. The contended window is
-microseconds and the collision rate is low, so taking a row lock on every read would cost more than
-the rare rejected write it saves. What matters is that a collision is *detected*: a last-writer-wins
-update would let a driver's acceptance silently overwrite a rider's cancellation, which is the same
-class of bug as double-assignment wearing different clothes. A losing writer gets `409` with
-`Retry-After` and decides again, because the right action genuinely depends on what the winner did.
+生命周期转换——接受、开始、完成、取消——使用 `version` 列和 `UPDATE ... WHERE version = :expected`，而不是 `SELECT ... FOR UPDATE`。争用窗口是微秒级且碰撞率很低，因此在每次读取上都拿行锁的代价会超过它省下的那少数几次被拒绝的写入。关键在于碰撞必须*被检测到*：last-writer-wins 的更新会让司机的接受悄悄覆盖乘客的取消，这与双重分配属于同一类缺陷，只是换了身衣服。落败的写入方会收到带 `Retry-After` 的 `409` 并重新决策，因为正确的动作确实取决于赢家做了什么。
 
-Pessimistic locking remains the wrong tool for matching itself, where the contended resource is
-discovered by a search rather than known in advance.
+悲观锁对于匹配本身来说仍是错误的工具，因为那里被争用的资源是通过搜索发现的，而不是事先已知的。
 
-## Why not Redlock
+## 为什么不使用 Redlock
 
-Redlock (locking a majority of N independent Redis nodes) is the textbook answer and is rejected
-deliberately:
+Redlock（对 N 个独立 Redis 节点中的多数加锁）是教科书式的答案，这里是有意拒绝它的：
 
-1. **Its safety argument depends on assumptions this system cannot make.** Redlock is safe only under
-   bounded clock drift and bounded process pauses. A JVM stop-the-world GC pause longer than the
-   lease breaks it, and JVM pauses of hundreds of milliseconds are ordinary. Kleppmann's critique
-   ("How to do distributed locking", 2016) is the reference; Antirez's response does not resolve the
-   pause case for lock holders performing external writes.
-2. **A lock cannot make an external write safe on its own.** Whatever the lock protocol, the
-   assignment write to Postgres needs to be rejected if the holder's lease has lapsed — which
-   requires fencing tokens at the resource. Once the resource validates fencing tokens, the elaborate
-   multi-node acquisition adds cost without adding a guarantee.
-3. **Multi-node Redis is real operational cost** for a guarantee already provided by a single unique
-   index.
+1. **它的安全性论证依赖于本系统无法做出的假设。** Redlock 只在有界时钟漂移和有界进程暂停下才是安全的。一次长于租约的 JVM stop-the-world GC 暂停就会破坏它，而数百毫秒的 JVM 暂停是家常便饭。Kleppmann 的批评（"How to do distributed locking"，2016）是权威参考；Antirez 的回应并未解决对执行外部写入的锁持有者而言的暂停问题。
+2. **锁本身无法让一次外部写入变得安全。** 无论采用什么锁协议，只要持有者的租约已失效，对 Postgres 的分配写入就必须被拒绝——这要求在资源侧校验围栏令牌（fencing token）。一旦资源会校验围栏令牌，那套复杂的多节点获取流程就只是增加成本而不增加任何保证。
+3. **多节点 Redis 是真实的运维成本**，换来的保证已经由一个唯一索引提供了。
 
-Using a simple single-Redis CAS for the fast path and being explicit that it is *not* the safety
-mechanism is the more defensible engineering position than deploying Redlock and treating its
-guarantee as absolute.
+在快速路径上使用简单的单节点 Redis CAS，并明确声明它*不是*安全性机制，比部署 Redlock 并把它的保证当作绝对真理是更站得住脚的工程立场。
 
-## Consequences
+## 后果
 
-**Positive**
+**正面**
 
-- The invariant holds under Redis loss, network partition, worker pause, and duplicate Kafka
-  delivery — all of which are covered by integration tests.
-- Contention resolution costs one Redis round trip; losers make progress on a different driver
-  instead of queueing.
-- `driver_claim_contention_total` makes contention an observable quantity rather than a mystery.
+- 不变式在 Redis 数据丢失、网络分区、工作节点暂停和 Kafka 重复投递下都成立——这些都有集成测试覆盖。
+- 争用的解决只花一次 Redis 往返；落败者在另一名司机身上继续推进，而不是排队等待。
+- `driver_claim_contention_total` 让争用成为一个可观测的量，而不是一桩悬案。
 
-**Negative**
+**负面**
 
-- Two mechanisms to keep in sync. Redis state can drift from Postgres, so `ClaimReconciler` sweeps
-  every 30 s for claims Postgres says no trip is holding and releases them. It syncs Redis *from*
-  Postgres and never the reverse — a reconciler that trusted Redis could delete a live assignment.
-  It considers only claims with **no TTL**, which removes the race this kind of sweep usually has:
-  an untimed claim can only come from `markOnTrip`, which runs after an acceptance commits, whereas
-  a claim still carrying a TTL may be an offer whose `ride.matched.v1` has not been consumed yet —
-  no trip row justifies it, and freeing it would take the driver from a match about to land.
-- The unique index serializes concurrent inserts for the same `driver_id`, so a pathological
-  hot-driver scenario is bounded by Postgres. Acceptable: the Redis layer means this path is rarely
-  reached.
-- Constraint-violation exceptions are normal control flow here, not errors. They are counted, not
-  logged at `ERROR`, so the signal is not drowned out.
+- 需要保持同步的机制有两套。Redis 状态可能与 Postgres 漂移，因此 `ClaimReconciler` 每 30 秒扫一次，找出 Postgres 认为没有任何行程持有的认领并释放它们。它只*从* Postgres 向 Redis 同步，绝不反向——一个信任 Redis 的协调器可能会删掉一个仍然有效的分配。它只考虑**没有 TTL** 的认领，这消除了此类清扫通常会有的竞态：一个不带时限的认领只可能来自 `markOnTrip`（它在一次接受提交之后运行），而仍带 TTL 的认领可能是某个 offer，其 `ride.matched.v1` 尚未被消费——没有任何行程行为它背书，释放它就会把司机从一场即将落地的匹配中夺走。
+- 唯一索引会串行化对同一个 `driver_id` 的并发插入，因此病态的热门司机场景的上限由 Postgres 决定。可接受：Redis 层的存在意味着这条路径很少被触达。
+- 约束冲突异常在这里是正常控制流，而不是错误。它们被计数，而不是以 `ERROR` 级别记日志，这样信号才不会被淹没。
 
-## Verification
+## 验证
 
-**Measured 2026-09-04.** `DriverClaimIT`: 200 virtual threads held at a `CountDownLatch` are
-released simultaneously against a single `AVAILABLE` driver.
+**测量于 2026-09-04。** `DriverClaimIT`：200 个虚拟线程（virtual threads）在一个 `CountDownLatch` 上被扣住，然后针对唯一一名 `AVAILABLE` 司机同时释放。
 
-| Implementation | Winners out of 200 |
+| 实现 | 200 个中的胜出者 |
 |---|---|
-| Lua script (atomic check-and-set) | **1** |
-| Naive check-then-set, two round trips | **200** |
+| Lua 脚本（原子的 check-and-set） | **1** |
+| 朴素的 check-then-set，两次往返 | **200** |
 
-The second row is the point. Replacing the script with the obvious implementation — read the
-status, then write the reservation — does not produce an occasional double-assignment that a
-retry might paper over. **Every single thread wins**, because all 200 read `AVAILABLE` before
-any of them writes `RESERVED`. Under real load that is 200 riders dispatched to one driver.
+第二行才是重点。把脚本换成显而易见的实现——先读状态，再写预订——产生的不是那种一次重试就能糊弄过去的偶发双重分配。**每一个线程都会胜出**，因为全部 200 个线程都在其中任何一个写入 `RESERVED` 之前读到了 `AVAILABLE`。在真实负载下，这就是 200 名乘客被派给同一名司机。
 
-This was verified by deliberately breaking the implementation and confirming the test fails, then
-restoring it. A concurrency test that has never been seen to fail is decoration.
+这一点通过故意破坏实现并确认测试失败、然后恢复实现来验证。一个从未被见过失败的并发测试只是装饰品。
 
-**Measured 2026-09-09**, when the lifecycle was wired up. Two more guards, falsified the same way:
+**测量于 2026-09-09**，即生命周期接线完成之时。另外两道防护，以同样的方式被证伪：
 
-| Guard removed | Result |
+| 被移除的防护 | 结果 |
 |---|---|
-| `releaseClaim` after a terminal transition | 2 failures — the driver stays `RESERVED` after the trip completes |
-| `AND version = :expectedVersion` on the lifecycle update | 32 concurrent accepts of one trip, **all 32 win** |
+| 终态转换后的 `releaseClaim` | 2 次失败——行程完成后司机仍停留在 `RESERVED` |
+| 生命周期更新上的 `AND version = :expectedVersion` | 同一行程的 32 个并发接受，**32 个全部成功** |
 
-The second is the same shape as the table above and worth the same attention. Without the version
-predicate the race does not produce an occasional lost update; every thread reads version 0, every
-`UPDATE` matches, and one trip records thirty-two acceptances.
+第二个与上表形状相同，值得同样的重视。没有 version 谓词时，这个竞态产生的不是偶发的丢失更新；每个线程都读到 version 0，每次 `UPDATE` 都匹配成功，于是一次行程记录下三十二次接受。
 
-`DriverClaimIT` assertions:
+`DriverClaimIT` 断言：
 
-- exactly one thread receives a successful assignment;
+- 恰好一个线程收到成功的分配；
 - `SELECT count(*) FROM trips WHERE driver_id = ? AND status IN ('OFFERED','ACCEPTED','IN_PROGRESS')`
-  returns 1;
-- the 199 losers each report `ALREADY_CLAIMED` or a constraint rejection, and none throw an unhandled
-  exception.
+  返回 1；
+- 199 个落败者各自报告 `ALREADY_CLAIMED` 或约束拒绝，且没有任何一个抛出未处理异常。
 
-The same assertion runs as a post-condition of every load test.
+同一断言也作为每次负载测试的后置条件运行。

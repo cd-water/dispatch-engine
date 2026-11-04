@@ -8,8 +8,7 @@ import java.sql.Timestamp;
 import java.util.UUID;
 
 /**
- * Writes outbox rows through the same {@link JdbcClient} the trip insert uses, so both join
- * the caller's transaction automatically.
+ * 通过与行程插入相同的 {@link JdbcClient} 写入发件箱行，因此两者会自动加入调用方的事务。
  */
 public class JdbcOutboxWriter implements OutboxWriter {
 

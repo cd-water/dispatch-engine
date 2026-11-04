@@ -15,8 +15,8 @@
   <name>trip-service</name>
   <description>Trip state machine, PostgreSQL system of record, transactional outbox.</description>
 
-  <!-- Common dependencies and the Spring Boot repackage goal are inherited from
-       services/pom.xml. Add only what is specific to this service. -->
+  <!-- 公共依赖和 Spring Boot 的 repackage goal 都继承自
+       services/pom.xml。这里只添加本服务特有的内容。 -->
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -26,20 +26,19 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-validation</artifactId>
     </dependency>
-    <!-- The STARTER, not bare spring-kafka. Boot 4 splits auto-configuration into
-         per-technology modules, and the bare library brings none of it: listeners are
-         simply never registered, with no error to explain why. -->
+    <!-- 用的是 STARTER，而不是裸 spring-kafka。Boot 4 把自动配置拆分成了
+         按技术划分的模块，而裸库一样也带不来：监听器根本不会被注册，
+         也没有任何报错说明原因。 -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-kafka</artifactId>
     </dependency>
 
     <!--
-      Redis, for the claim store. This service does not search the geo index, but it is the
-      one that hands drivers back: a trip reaching a terminal state releases the claim that
-      the matching engine took. Sharing the geoindex module rather than reimplementing the
-      release script is the point — the token check that makes release safe lives in one
-      place.
+      Redis，用于认领存储。这个服务不搜索地理索引，但把司机交还回来的正是它：
+      行程到达终态时会释放 matching engine 取得的认领。复用 geoindex 模块而不是
+      重新实现释放脚本，这正是关键所在 —— 让释放得以安全的令牌校验只存在于
+      一处。
     -->
     <dependency>
       <groupId>com.ridematching</groupId>
@@ -89,9 +88,9 @@
       <artifactId>testcontainers-kafka</artifactId>
       <scope>test</scope>
     </dependency>
-    <!-- No Redis module: there is no dedicated Testcontainers one for it, and a
-         GenericContainer on the image the stack actually runs is what the geoindex tests
-         already use. -->
+    <!-- 没有 Redis 模块：Testcontainers 并没有为它提供专门的模块，而针对
+         这套技术栈实际运行的那个镜像使用 GenericContainer，正是 geoindex 测试
+         已经在用的做法。 -->
 
     <dependency>
       <groupId>org.awaitility</groupId>

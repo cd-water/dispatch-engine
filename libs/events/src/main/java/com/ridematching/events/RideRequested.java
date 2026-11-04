@@ -4,17 +4,17 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * A rider asked for a trip. The work item the matching engine consumes.
+ * 一位乘客请求了一次行程。这是匹配引擎消费的工作项。
  *
- * @param eventId    unique per event instance; consumers dedupe on it
- * @param rideId     the ride, and the partition key
- * @param riderId    who asked
- * @param pickupLat  pickup latitude
- * @param pickupLng  pickup longitude
- * @param dropoffLat dropoff latitude
- * @param dropoffLng dropoff longitude
- * @param vehicleClass requested tier
- * @param occurredAt when the request was accepted
+ * @param eventId    对每个事件实例唯一；消费者按它去重
+ * @param rideId     行程本身，同时是分区键
+ * @param riderId    发起请求的人
+ * @param pickupLat  上车点纬度
+ * @param pickupLng  上车点经度
+ * @param dropoffLat 下车点纬度
+ * @param dropoffLng 下车点经度
+ * @param vehicleClass 请求的车型档位
+ * @param occurredAt 请求被受理的时刻
  */
 public record RideRequested(
         UUID eventId,
@@ -29,8 +29,8 @@ public record RideRequested(
 
     @Override
     public String partitionKey() {
-        // Keying on rideId is what guarantees requested -> matched -> completed can never be
-        // observed out of order for one ride.
+        // 以 rideId 作为键，才能保证同一次行程的 requested -> matched -> completed
+        // 永远不会乱序地被观察到。
         return rideId.toString();
     }
 

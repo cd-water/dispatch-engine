@@ -5,22 +5,18 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import java.time.Duration;
 
 /**
- * De-duplication for at-least-once consumers (ADR-0003).
+ * 为至少一次（at-least-once）的消费者提供去重（ADR-0003）。
  *
- * <p>Kafka redelivers on rebalance, on a crash between processing and offset commit, and on
- * any retry. Without this, a rider gets two "driver found" notifications for one ride, and
- * billing charges twice.
+ * <p>Kafka 在重平衡时、在处理与偏移量提交之间崩溃时、以及任何重试时都会重新投递。若没有去重，
+ * 同一次行程会让乘客收到两条"已找到司机"通知，计费也会扣两次款。
  *
- * <p>Backed by Redis {@code SET NX} rather than a database table because these consumers own
- * no durable state — giving notification-service a PostgreSQL schema purely to hold event ids
- * would be a heavy price for a bookkeeping concern. The trade-off is honest: a Redis flush
- * would allow duplicates through, which for a notification is a second push message, not a
- * corrupted ledger. A consumer with money at stake should dedupe in the same transaction as
- * its write instead.
+ * <p>底层使用 Redis {@code SET NX} 而不是数据库表，因为这些消费者并不持有任何持久状态——
+ * 为了存放事件 id 就给 notification-service 单独建一个 PostgreSQL 模式，对一件簿记性质的事情来说
+ * 代价过于沉重。这个取舍是公开的：Redis 被清空后重复事件会漏过去，对通知而言那只是多推送一条消息，
+ * 而不是账本被破坏。涉及金钱的消费者应当在与其写入相同的事务里去重。
  *
- * <p>The TTL bounds memory. It must comfortably exceed the longest plausible redelivery
- * window — a consumer restarting from a lagged offset — or an old duplicate would slip past
- * an expired marker.
+ * <p>TTL 用于限制内存占用。它必须远大于最长的合理重投递窗口——即消费者从滞后的偏移量重启——
+ * 否则一个旧的重复事件会从已过期的标记旁边溜过去。
  */
 public class ProcessedEvents {
 
@@ -30,19 +26,18 @@ public class ProcessedEvents {
 
     public ProcessedEvents(StringRedisTemplate redis, String consumerGroup, Duration retention) {
         this.redis = redis;
-        // Namespaced per consumer group: the same event legitimately reaches notification and
-        // billing, and one must not mask the other.
+        // 按消费者组划分命名空间：同一个事件合法地同时到达通知与计费，
+        // 二者不得互相遮蔽。
         this.prefix = "processed:" + consumerGroup + ":";
         this.retention = retention;
     }
 
     /**
-     * Marks {@code eventId} as seen, returning whether this caller is the first.
+     * 把 {@code eventId} 标记为已见过，返回当前调用方是否为第一个。
      *
-     * <p>{@code SET NX} is atomic, so two consumer threads handling the same redelivered
-     * record cannot both be told they are first.
+     * <p>{@code SET NX} 是原子的，因此处理同一条重投递记录的两个消费线程不可能同时被告知自己是第一个。
      *
-     * @return true if the event has not been processed before and should be handled now
+     * @return 如果该事件此前未被处理过、现在应当被处理，则返回 true
      */
     public boolean markIfFirst(String eventId) {
         Boolean first = redis.opsForValue().setIfAbsent(prefix + eventId, "1", retention);
@@ -50,11 +45,10 @@ public class ProcessedEvents {
     }
 
     /**
-     * Forgets an event so it can be reprocessed.
+     * 忘掉一个事件，使其可以被重新处理。
      *
-     * <p>Called when handling fails: the marker is written <em>before</em> the work, so a
-     * failure that left the marker in place would suppress the retry entirely and silently
-     * drop the event.
+     * <p>在处理失败时调用：标记是在工作<em>之前</em>写入的，因此若失败后标记仍然保留，
+     * 重试会被完全压制，事件会被静默丢弃。
      */
     public void forget(String eventId) {
         redis.delete(prefix + eventId);

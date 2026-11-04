@@ -1,59 +1,45 @@
-# ADR-0002: Redis GEO for the hot path, PostGIS for analytics
+# ADR-0002：Redis GEO 用于热点路径（hot path），PostGIS 用于分析
 
-**Status:** Accepted · **Date:** 2026-09-03
+**状态：** 已采纳 · **日期：** 2026-09-03
 
-## Context
+## 背景
 
-10,000 drivers reporting at 1 Hz produce **10,000 writes/sec**, each overwriting the previous value
-for that driver. Matching needs a k-nearest-neighbours query within a radius, in single-digit
-milliseconds, several hundred times per second.
+10,000 名司机以 1 Hz 上报位置，产生 **10,000 次写入/秒**，每次写入都覆盖该司机上一次的值。匹配需要在半径范围内做 k 近邻（k-nearest-neighbours）查询，要求在个位数毫秒内完成，且每秒执行数百次。
 
-This is a write-dominated workload over disposable data with a strict read latency budget.
+这是一个以写入为主的负载，处理的是可丢弃的数据，同时读取延迟预算非常严格。
 
-## Decision
+## 决策
 
-**Redis GEO (`GEOADD` / `GEOSEARCH`) is the live index.** PostGIS remains in the schema for
-persistent geography — trip pickup/dropoff points, zone polygons, historical analysis — but is never
-on the matching path.
+**Redis GEO（`GEOADD` / `GEOSEARCH`）是在线索引。** PostGIS 仍保留在 schema 中用于持久化的地理数据——行程的上/下车点、区域多边形、历史分析——但绝不出现在匹配路径上。
 
-## Rationale
+## 理由
 
 | | Redis GEO | PostgreSQL + PostGIS |
 |---|---|---|
-| Update cost | Sorted-set insert on a 52-bit geohash, O(log N), in memory | Row update + GiST index maintenance + WAL + eventual vacuum |
-| 10k writes/s | Comfortable; a pipelined batch is one syscall for hundreds of updates | Sustainable, but generates continuous dead tuples and autovacuum pressure on a table that is 100% churn |
-| Radius query | `GEOSEARCH ... BYRADIUS ... ASC COUNT n`, results pre-sorted by distance | `ST_DWithin` + `ORDER BY <->`, correct and flexible, but a planner and buffer-cache round trip |
-| Durability | None assumed — and none needed | Full ACID |
-| Complex geospatial | Radius and box only | Polygons, joins, arbitrary predicates |
+| 更新成本 | 在内存中对 52 位 geohash 做有序集合（sorted set）插入，O(log N) | 行更新 + GiST 索引维护 + WAL + 随后的 vacuum |
+| 10k 次写入/秒 | 轻松应对；一次 pipeline 批量就是一次系统调用完成数百次更新 | 可以支撑，但会在一张 100% 高频变动的表上持续产生死元组（dead tuple）和 autovacuum 压力 |
+| 半径查询 | `GEOSEARCH ... BYRADIUS ... ASC COUNT n`，结果已按距离预排序 | `ST_DWithin` + `ORDER BY <->`，正确且灵活，但需要一次规划器和缓冲区缓存的往返 |
+| 持久性 | 不做假设——也不需要 | 完整 ACID |
+| 复杂地理空间操作 | 仅半径和矩形 | 多边形、连接、任意谓词 |
 
-The decisive point is not raw speed, it is **matching the storage model to the data's semantics**: a
-driver's position is a *cache of the present*, not a *record of the past*. Writing 864 million rows
-per day of data whose only reader wants the newest value is the wrong shape for an ACID store. Losing
-the entire Redis index costs one second of driver frames to rebuild.
+决定性的点不在于裸速度，而在于**让存储模型与数据的语义相匹配**：司机的位置是*对当下的缓存*，而不是*对过去的记录*。每天写入 8.64 亿行数据，而唯一的读者只想要最新的值，这对 ACID 存储来说是错误的形状。丢失整个 Redis 索引的代价，只需重新积累一秒钟的司机位置帧即可恢复。
 
-Trip history — which genuinely is a record of the past — lives in Postgres, and geographic columns
-there use PostGIS so that "how many trips started in zone X" stays a SQL query rather than an
-application-side loop.
+行程历史——它确实是对过去的记录——存放在 Postgres 中，其中的地理列使用 PostGIS，这样"在区域 X 有多少行程出发"仍然是一条 SQL 查询，而不是应用侧的循环。
 
-## Consequences
+## 后果
 
-**Positive**
+**正面**
 
-- Sub-millisecond candidate lookups; the matching budget is spent on ranking and claiming, not I/O.
-- Postgres write volume drops from ~10,000/s to ~1,500/s, so its connection pool and vacuum settings
-  are sized for transactional work only.
-- Redis memory is bounded and small: 10k drivers ≈ 50 MB including state hashes.
+- 亚毫秒级的候选司机查找；匹配预算花在排序和认领上，而不是 I/O 上。
+- Postgres 的写入量从约 10,000/秒降到约 1,500/秒，因此它的连接池和 vacuum 配置只需按事务型负载来定容量。
+- Redis 内存有界且很小：10k 名司机 ≈ 50 MB（含状态 hash）。
 
-**Negative**
+**负面**
 
-- Two stores to operate, and a consistency seam between them. Managed by making Postgres
-  authoritative for anything durable and treating Redis as reconstructible.
-- Radius/box queries only. Non-circular service areas would need a PostGIS pre-filter or an H3 index.
-- Redis Cluster requires hash-tagged keys (`geo:drivers:{city}`) so a search and its Lua scripts stay
-  within one slot — a real constraint on how the key space can be sharded later.
+- 要运维两个存储，且两者之间存在一致性接缝。缓解办法是让 Postgres 对一切持久数据拥有权威性，并把 Redis 视为可重建的。
+- 仅支持半径/矩形查询。非圆形的服务区域将需要 PostGIS 预过滤或 H3 索引。
+- Redis Cluster 要求带 hash tag 的键（`geo:drivers:{city}`），以便一次搜索和它的 Lua 脚本留在同一个 slot 内——这对将来如何分片键空间是真实的约束。
 
-## Note on the alternative
+## 关于备选方案的说明
 
-The `DriverLocationIndex` port ([ADR-0001](0001-hexagonal-architecture.md)) has room for a PostGIS
-adapter, and building one to benchmark the two under identical load is on the roadmap. Asserting the
-trade-off with numbers is stronger than asserting it from first principles.
+`DriverLocationIndex` 端口（[ADR-0001](0001-hexagonal-architecture.md)）为 PostGIS 适配器留有空间，构建一个以在相同负载下对比评测两者已列入路线图。用数字来证明这个权衡，比从第一性原理断言它更有说服力。

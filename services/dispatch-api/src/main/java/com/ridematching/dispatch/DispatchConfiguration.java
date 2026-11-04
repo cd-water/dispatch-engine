@@ -21,8 +21,8 @@ import tools.jackson.databind.ObjectMapper;
 import java.time.Clock;
 
 /**
- * Wires the dispatch API. All Spring knowledge lives here so the use case and adapters stay
- * constructible by hand in tests (ADR-0001).
+ * 装配派单 API。所有 Spring 知识都集中在这里，好让用例和适配器在测试中仍可手工构造
+ * （ADR-0001）。
  */
 @Configuration
 @EnableScheduling
@@ -71,11 +71,11 @@ public class DispatchConfiguration implements SchedulingConfigurer {
     }
 
     /**
-     * Drains the outbox on a short fixed delay.
+     * 以较短的固定延迟排空发件箱。
      *
-     * <p>Fixed delay rather than fixed rate: if Kafka slows and a batch outlasts the interval,
-     * fixed rate would stack overlapping drains onto an already-struggling broker. Fixed delay
-     * lets the backlog grow instead, which the outbox.backlog gauge makes visible.
+     * <p>用固定延迟而不是固定频率：如果 Kafka 变慢、一批耗时超过间隔，固定频率会把重叠的
+     * 排空堆到本已吃力的 broker 上。固定延迟则让积压增长，而 outbox.backlog 指标会把它
+     * 显示出来。
      */
     @Override
     public void configureTasks(ScheduledTaskRegistrar registrar) {

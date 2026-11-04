@@ -65,13 +65,13 @@ class CoordinatesTest {
     @Test
     @DisplayName("matches the distance Redis GEODIST reports for the same pair")
     void matchesKnownDistance() {
-        // Same two points used to smoke-test the Redis geo index during setup;
-        // GEOSEARCH reported 0.7480 km between them.
+        // 与环境搭建时冒烟测试 Redis 地理索引所用的是同样两个点；
+        // GEOSEARCH 报告两者相距 0.7480 km。
         Coordinates driver1 = new Coordinates(30.0444, 31.2357);
         Coordinates driver2 = new Coordinates(30.0500, 31.2400);
 
-        // 5 m tolerance: Redis models the earth as a sphere too, but with a slightly
-        // different radius constant, so exact agreement is not expected.
+        // 5 m 容差：Redis 同样把地球建模为球体，但半径常数略有不同，
+        // 因此并不期望完全一致。
         assertThat(driver1.distanceMetersTo(driver2)).isCloseTo(748.0, within(5.0));
     }
 

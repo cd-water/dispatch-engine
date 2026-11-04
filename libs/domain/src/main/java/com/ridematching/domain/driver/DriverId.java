@@ -3,14 +3,14 @@ package com.ridematching.domain.driver;
 import java.util.UUID;
 
 /**
- * Identifier for a driver.
+ * 一位司机的标识符。
  *
- * <p>Wrapped rather than passed as a bare {@code UUID} so the compiler rejects handing a
- * rider id where a driver id is expected.
+ * <p>选择包装而不是直接传递裸的 {@code UUID}，这样当在期望司机 id 的地方传入乘客 id 时，
+ * 编译器能拒绝。
  *
- * <p>This is the id the whole concurrency design turns on: it is the Redis claim key, the
- * subject of the {@code uniq_driver_active_trip} unique partial index in PostgreSQL, and
- * the Kafka partition key for location telemetry (ADR-0004, ADR-0003).
+ * <p>整个并发设计正是围绕这个 id 展开的：它是 Redis 认领键、
+ * PostgreSQL 中 {@code uniq_driver_active_trip} 唯一部分索引的主体，
+ * 同时也是位置遥测的 Kafka 分区键（ADR-0004、ADR-0003）。
  */
 public record DriverId(UUID value) {
 

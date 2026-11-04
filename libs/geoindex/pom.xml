@@ -16,10 +16,10 @@
   <description>Redis geospatial index and driver claim protocol, shared by the services that use them.</description>
 
   <!--
-    Exists because two services touch the same Redis key space: location-service writes the
-    index, matching-engine searches it and claims drivers in it. A service depending on
-    another service would be wrong, and duplicating the key layout in both would let a
-    one-character divergence silently split the namespace in two. This module owns it.
+    存在的原因是两个服务会触碰同一片 Redis 键空间：location-service 写入
+    索引，matching-engine 搜索它并在其中认领司机。让一个服务依赖另一个服务
+    是错误的，而在两边各自复制键布局，则会让一个字符的差异悄悄把命名空间
+    一分为二。这个模块拥有它。
   -->
   <dependencies>
     <dependency>

@@ -20,20 +20,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Asserts the API explains itself when a request is rejected.
+ * 断言 API 在请求被拒绝时能解释清楚自己。
  *
- * <p>The bug this guards against is not a crash — it is Spring's default error body,
- * {@code {"timestamp","status":400,"error":"Bad Request","path"}}, which names neither the
- * field nor the reason. That response is technically correct and practically useless, and it
- * is what this API returned until these handlers existed.
+ * <p>这里要防的 bug 不是崩溃——而是 Spring 默认的错误响应体
+ * {@code {"timestamp","status":400,"error":"Bad Request","path"}}，它既不点出字段，也不
+ * 说明原因。这个响应技术上正确，实际上毫无用处，而在这些处理器出现之前，这个 API 返回的
+ * 就是它。
  *
- * <p>Driven through a standalone MockMvc against a minimal controller rather than the real
- * one: the behaviour under test belongs to the advice, and binding it to the real controller's
- * dependencies would test the wiring instead of the error contract.
+ * <p>用 standalone MockMvc 驱动一个最小控制器，而不是真实控制器：被测试的行为属于 advice，
+ * 把它绑到真实控制器的依赖上，测的就成了装配而不是错误契约。
  */
 class RestExceptionHandlerTest {
 
-    /** Minimal endpoint whose only job is to fail in the ways the advice must handle. */
+    /** 最小端点，唯一职责是以 advice 必须处理的方式失败。 */
     @RestController
     static class ProbeController {
 
@@ -65,7 +64,7 @@ class RestExceptionHandlerTest {
     @Test
     @DisplayName("a validation failure names every offending field")
     void validationFailureNamesFields() throws Exception {
-        // riderId missing, and latitude out of range.
+        // 缺少 riderId，且纬度越界。
         String body = """
                 {"pickupLat": 999.0, "pickupLng": 31.2357,
                  "dropoffLat": 30.05, "dropoffLng": 31.24}
@@ -74,7 +73,7 @@ class RestExceptionHandlerTest {
         mvc.perform(post("/probe").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.title").value("Invalid request"))
-                // The whole point: the caller learns WHICH fields, not just that something failed.
+                // 关键之处：调用方得知的是哪个字段，而不只是"有东西失败了"。
                 .andExpect(jsonPath("$.errors.riderId").exists())
                 .andExpect(jsonPath("$.errors.pickupLat").exists());
     }
@@ -96,8 +95,8 @@ class RestExceptionHandlerTest {
         mvc.perform(post("/probe").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"pickupLat\": \"not-a-number\"}"))
                 .andExpect(status().isBadRequest())
-                // Jackson names Java classes and field paths in its messages. Returning those
-                // hands out a map of the internals and helps no legitimate client.
+                // Jackson 的消息会点出 Java 类和字段路径。返回这些等于递出一张内部
+                // 结构图，对任何合法客户端都没有帮助。
                 .andExpect(jsonPath("$.detail")
                         .value(org.hamcrest.Matchers.not(
                                 org.hamcrest.Matchers.containsString("com.ridematching"))));
@@ -106,8 +105,8 @@ class RestExceptionHandlerTest {
     @Test
     @DisplayName("a lost driver claim is a 409, not a 500")
     void driverConflictIsNotAServerError() throws Exception {
-        // Under contention this is the ADR-0004 guarantee working. A 500 would page someone
-        // for a system behaving exactly as designed.
+        // 在争用下这正是 ADR-0004 的保证在生效。返回 500 会因为系统完全按设计运行而
+        // 把人半夜叫起来。
         mvc.perform(get("/probe/conflict"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.title").value("Driver unavailable"));

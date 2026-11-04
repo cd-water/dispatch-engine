@@ -2,7 +2,7 @@ package com.ridematching.trip.application;
 
 import com.ridematching.domain.trip.RideId;
 
-/** No trip with the requested id. Surfaces as {@code 404}. */
+/** 不存在所请求 id 的行程。以 {@code 404} 呈现。 */
 public class TripNotFoundException extends RuntimeException {
 
     private static final long serialVersionUID = 1L;

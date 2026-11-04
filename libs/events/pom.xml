@@ -16,9 +16,9 @@
   <description>Versioned domain event contracts shared across services.</description>
 
   <!--
-    Kept serialization-free on purpose. These types are the CONTRACT between services;
-    binding them to Jackson annotations would make a serialization change a contract
-    change. Adapters own the mapping. Versioning is by type name (ADR-0003).
+    特意保持与序列化解耦。这些类型是服务之间的契约（CONTRACT）；
+    把它们绑定到 Jackson 注解上，会让一次序列化变更变成一次契约变更。
+    映射由适配器负责。版本管理按类型名进行（ADR-0003）。
   -->
   <dependencies>
     <dependency>

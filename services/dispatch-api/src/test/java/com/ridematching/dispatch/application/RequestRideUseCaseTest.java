@@ -27,8 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * The idempotency algorithm (ADR-0005) with no database — the ports make the whole decision
- * tree testable in milliseconds, including the paths that are awkward to provoke for real.
+ * 不带数据库的幂等算法（ADR-0005）——端口让整个决策树可以在毫秒内测试，包括那些在真实
+ * 环境中很难触发的路径。
  */
 class RequestRideUseCaseTest {
 
@@ -36,7 +36,7 @@ class RequestRideUseCaseTest {
     private static final Coordinates PICKUP = new Coordinates(30.0444, 31.2357);
     private static final Coordinates DROPOFF = new Coordinates(30.0500, 31.2400);
 
-    /** In-memory store that behaves like the SQL one, including the atomic claim. */
+    /** 行为与 SQL 版本一致的内存存储，包括原子抢占。 */
     private static final class FakeIdempotencyStore implements IdempotencyStore {
         final Map<String, IdempotencyRecord> records = new HashMap<>();
         int claimAttempts = 0;
@@ -78,9 +78,8 @@ class RequestRideUseCaseTest {
     }
 
     /**
-     * Records inserts and the events written alongside them. The paired write is modelled
-     * all-or-nothing, exactly as the @Transactional boundary makes it in production, so a
-     * test cannot pass on a sequence the database would never produce.
+     * 记录插入以及随之写入的事件。成对的写入被建模为全有或全无，与生产中 @Transactional
+     * 边界的效果完全一致，这样测试就不会在一个数据库永远不会产生的序列上通过。
      */
     private static final class RecordingTripRepository implements TripRepository {
         final java.util.List<Trip> inserted = new java.util.ArrayList<>();
@@ -165,8 +164,8 @@ class RequestRideUseCaseTest {
         void claimsBeforeReading() {
             useCase.handle(command(), "key-1");
 
-            // A read-then-write check would have a window where two retries both see
-            // "not found". The claim must be the first thing that happens.
+            // 先读后写的检查会有一个窗口，让两个重试都看到"未找到"。抢占必须是第一个发生
+            // 的事情。
             assertThat(idempotency.claimAttempts).isEqualTo(1);
         }
     }
@@ -195,7 +194,7 @@ class RequestRideUseCaseTest {
         @DisplayName("a retry while the original is still running yields IN_PROGRESS")
         void inFlightRetry() {
             var cmd = command();
-            useCase.handle(cmd, "key-1");   // leaves the record IN_PROGRESS
+            useCase.handle(cmd, "key-1");   // 让记录停留在 IN_PROGRESS
 
             RideRequestOutcome retry = useCase.handle(cmd, "key-1");
 
@@ -208,8 +207,7 @@ class RequestRideUseCaseTest {
         void keyReuseIsRejected() {
             useCase.handle(command(), "key-1");
 
-            // Different rider entirely — replaying the first response would silently
-            // discard this request.
+            // 完全是另一个乘客——重放第一次的响应会悄悄丢弃这个请求。
             RideRequestOutcome reused = useCase.handle(command(), "key-1");
 
             assertThat(reused.kind()).isEqualTo(RideRequestOutcome.Kind.KEY_REUSE);
@@ -243,7 +241,7 @@ class RequestRideUseCaseTest {
             assertThatThrownBy(() -> useCase.handle(command(), "key-1"))
                     .isInstanceOf(IllegalStateException.class);
 
-            // Without the release, this key would return 409 for its whole 24h lifetime.
+            // 没有这次释放，这个键在整整 24 小时的生命期里都会返回 409。
             assertThat(idempotency.find("key-1")).isEmpty();
         }
 

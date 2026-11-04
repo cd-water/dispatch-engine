@@ -10,13 +10,13 @@ import tools.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
 
-/** Wires the consumer. All Spring knowledge lives here (ADR-0001). */
+/** 装配消费者。所有 Spring 知识都集中在这里（ADR-0001）。 */
 @Configuration
 public class BillingConfiguration {
 
     /**
-     * De-duplication markers are kept for 24 hours: comfortably longer than any plausible
-     * redelivery window, including a consumer restarting from a badly lagged offset.
+     * 去重标记保留 24 小时：宽裕地长于任何可能的重新投递窗口，包括消费者从一个严重滞后的
+     * 偏移量重新启动的情况。
      */
     @Bean
     public ProcessedEvents processedEvents(StringRedisTemplate redis) {

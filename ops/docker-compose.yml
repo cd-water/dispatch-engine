@@ -1,32 +1,31 @@
-# Infrastructure for the Real-Time Ride-Matching Engine.
+# 实时出行撮合引擎（Real-Time Ride-Matching Engine）的基础设施。
 #
-# Used two ways, from one definition:
-#   1. As the base of the dev container (see .devcontainer/docker-compose.dev.yml)
-#   2. Standalone:  podman compose -f ops/docker-compose.yml up -d
+# 同一份定义，有两种用法：
+#   1. 作为开发容器的基础（见 .devcontainer/docker-compose.dev.yml）
+#   2. 独立运行：podman compose -f ops/docker-compose.yml up -d
 #
-# Every service carries an explicit mem_limit. Without one the JVM reads the VM's total
-# memory for MaxRAMPercentage and concludes it may grow to several GB; six services doing
-# that is what exhausted the machine once already.
+# 每个服务都显式设置了 mem_limit。不设置的话，JVM 会把虚拟机的总内存当作
+# MaxRAMPercentage 的基数，从而认为自己可以增长到数 GB；六个服务都这样做，
+# 正是这台机器此前被内存耗尽的原因。
 #
-# Do NOT run the "app" profile and the dev container at the same time. Each mode fits
-# comfortably in the VM; both together do not, and the result is an OOM kill rather than a
-# slowdown:
-#   development  = infra + dev container
-#   full system  = infra + app services (+ observability), VS Code closed
+# 不要同时运行 "app" profile 和开发容器。任一模式都能轻松装进这台虚拟机；
+# 两者一起却装不下，结果是被 OOM 直接杀掉，而不是变慢：
+#   development  = 基础设施 + 开发容器
+#   full system  = 基础设施 + 应用服务（+ 可观测性），同时关闭 VS Code
 
 name: ride-matching-engine
 
 services:
   postgres:
-    image: postgres:16-alpine
-    # Measured at ~38MB idle; 256m leaves headroom for shared_buffers and the connection pool
-    # under load without letting it grow unbounded.
+    image: postgres:16.15
+    # 空闲时实测约 38MB；256m 为 shared_buffers 和连接池在负载下留出余量，
+    # 同时不会让它无限制增长。
     mem_limit: 256m
     environment:
       POSTGRES_USER: ride
       POSTGRES_PASSWORD: ride
       POSTGRES_DB: ride
-      # Faster startup; this database is disposable.
+      # 启动更快；这个数据库是可随意丢弃的。
       POSTGRES_INITDB_ARGS: "--data-checksums"
     ports:
       - "5432:5432"
@@ -42,11 +41,11 @@ services:
       - ride-net
 
   redis:
-    image: redis:7-alpine
-    # 10k drivers plus state hashes is ~50MB (ADR-0002). Redis is the cheapest thing here.
+    image: redis:7.4.11
+    # 1 万个司机加上状态哈希约 50MB（ADR-0002）。Redis 是这里内存开销最小的组件。
     mem_limit: 192m
-    # appendonly + everysec: a warm restart keeps the geo index rather than starting
-    # empty. Durability is not required here (ADR-0002) but a fast restart is convenient.
+    # appendonly + everysec：温重启能保留地理索引，而不是从空开始。这里并不
+    # 需要持久性（ADR-0002），但快速重启很方便。
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     ports:
       - "6379:6379"
@@ -61,32 +60,31 @@ services:
       - ride-net
 
   kafka:
-    # KRaft mode: single node, no ZooKeeper.
-    image: apache/kafka:3.8.1
-    # Measured at ~1GB before this limit: the largest infrastructure consumer by far.
+    # KRaft 模式：单节点，无需 ZooKeeper。
+    image: apache/kafka:4.1.2
+    # 设限前实测约 1GB：是基础设施中目前最大的内存消耗者。
     mem_limit: 768m
     environment:
-      # Halving the heap is the single biggest memory win in the stack. The default is 1G,
-      # which a single-broker development instance never needs. 768m of container leaves
-      # room above the 512m heap for the page cache and direct buffers, which is where a
-      # broker actually spends its memory.
+      # 减半堆内存是整个技术栈中最省内存的一项改动。默认值是 1G，单 broker 的
+      # 开发实例根本用不上。768m 的容器限制在 512m 堆之外，为页缓存和直接
+      # 缓冲区留出了空间，broker 的内存实际上正是花在这里。
       KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
       KAFKA_NODE_ID: "1"
       KAFKA_PROCESS_ROLES: "broker,controller"
       KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
       KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092"
-      # Two advertised listeners: "kafka:9092" for containers on ride-net,
-      # "localhost:29092" for tools running on Windows. A client that connects on the
-      # wrong one gets a metadata response pointing at an unreachable host.
+      # 两个通告的 listener："kafka:9092" 供 ride-net 上的容器使用，
+      # "localhost:29092" 供 Windows 上运行的工具使用。连错一方的客户端会拿到
+      # 指向不可达主机的元数据响应。
       KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
       KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-      # Single broker: everything replication-related must be 1 or the broker won't start.
+      # 单 broker：所有与副本（replication）相关的配置必须为 1，否则 broker 无法启动。
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
-      # No rebalance delay in dev: consumers should join instantly on restart.
+      # 开发环境不做重平衡延迟：消费者重启后应能立即加入。
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: "0"
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       CLUSTER_ID: "ride-matching-kraft-cluster"
@@ -104,8 +102,8 @@ services:
       - ride-net
 
   # ---------------------------------------------------------------------------------
-  # Application services. Behind the "app" profile so day-to-day dev container work does
-  # not rebuild six images; the load test and the Grafana dashboards need them running:
+  # 应用服务。放在 "app" profile 之下，这样日常的开发容器工作就不会重建六个
+  # 镜像；负载测试和 Grafana 仪表盘需要它们处于运行状态：
   #
   #   ./mvnw package -DskipTests
   #   podman compose -f ops/docker-compose.yml --profile app --profile observability up -d --build
@@ -117,9 +115,8 @@ services:
       dockerfile: ops/Dockerfile
       args:
         SERVICE: dispatch-api
-    # Hard ceiling. The JVM reads this cgroup limit for MaxRAMPercentage, so the two
-    # numbers are linked: changing one without the other either wastes memory or
-    # invites an OOM kill.
+    # 硬性上限。JVM 会读取这个 cgroup 限制作为 MaxRAMPercentage 的基数，因此两
+    # 个数字是联动的：只改其中一个，要么浪费内存，要么招来 OOM 杀掉。
     mem_limit: 512m
     environment:
       SERVER_PORT: "8080"
@@ -142,8 +139,8 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      # See ops/healthcheck.sh: a dependency-free probe that asserts the response body says
-      # UP, not merely that the port accepts connections.
+      # 见 ops/healthcheck.sh：一个无第三方依赖的探测脚本，会断言响应体内容
+      # 为 UP，而不只是端口能接受连接。
       test: ["CMD", "/app/healthcheck.sh"]
       interval: 10s
       timeout: 5s
@@ -159,9 +156,8 @@ services:
       dockerfile: ops/Dockerfile
       args:
         SERVICE: location-service
-    # Hard ceiling. The JVM reads this cgroup limit for MaxRAMPercentage, so the two
-    # numbers are linked: changing one without the other either wastes memory or
-    # invites an OOM kill.
+    # 硬性上限。JVM 会读取这个 cgroup 限制作为 MaxRAMPercentage 的基数，因此两
+    # 个数字是联动的：只改其中一个，要么浪费内存，要么招来 OOM 杀掉。
     mem_limit: 512m
     environment:
       SERVER_PORT: "8080"
@@ -177,8 +173,8 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      # See ops/healthcheck.sh: a dependency-free probe that asserts the response body says
-      # UP, not merely that the port accepts connections.
+      # 见 ops/healthcheck.sh：一个无第三方依赖的探测脚本，会断言响应体内容
+      # 为 UP，而不只是端口能接受连接。
       test: ["CMD", "/app/healthcheck.sh"]
       interval: 10s
       timeout: 5s
@@ -194,9 +190,8 @@ services:
       dockerfile: ops/Dockerfile
       args:
         SERVICE: matching-engine
-    # Hard ceiling. The JVM reads this cgroup limit for MaxRAMPercentage, so the two
-    # numbers are linked: changing one without the other either wastes memory or
-    # invites an OOM kill.
+    # 硬性上限。JVM 会读取这个 cgroup 限制作为 MaxRAMPercentage 的基数，因此两
+    # 个数字是联动的：只改其中一个，要么浪费内存，要么招来 OOM 杀掉。
     mem_limit: 448m
     environment:
       SERVER_PORT: "8080"
@@ -212,8 +207,8 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      # See ops/healthcheck.sh: a dependency-free probe that asserts the response body says
-      # UP, not merely that the port accepts connections.
+      # 见 ops/healthcheck.sh：一个无第三方依赖的探测脚本，会断言响应体内容
+      # 为 UP，而不只是端口能接受连接。
       test: ["CMD", "/app/healthcheck.sh"]
       interval: 10s
       timeout: 5s
@@ -223,27 +218,25 @@ services:
       - ride-net
 
   trip-service:
-    # Moved out of app-full and into app: this service owns the trip lifecycle and the
-    # claim release, so without it a matched driver is never handed back and the pool
-    # drains over the course of a load test.
+    # 从 app-full 移到 app：这个服务负责行程生命周期和认领释放，没有它，被
+    # 撮合到的司机永远不会被归还，司机池会在负载测试过程中被耗尽。
     profiles: ["app"]
     build:
       context: ..
       dockerfile: ops/Dockerfile
       args:
         SERVICE: trip-service
-    # Hard ceiling. The JVM reads this cgroup limit for MaxRAMPercentage, so the two
-    # numbers are linked: changing one without the other either wastes memory or
-    # invites an OOM kill.
+    # 硬性上限。JVM 会读取这个 cgroup 限制作为 MaxRAMPercentage 的基数，因此两
+    # 个数字是联动的：只改其中一个，要么浪费内存，要么招来 OOM 杀掉。
     #
-    # Raised from 320m along with the collector. This is no longer a scaffold that runs a
-    # JVM and does nothing: it holds a connection pool, a Kafka consumer group and a Redis
-    # client, and it serves the lifecycle transitions a driver waits on.
+    # 与采集器一起从 320m 上调。这已不再是一个只运行 JVM 却什么都不做的脚手架：
+    # 它持有一个连接池、一个 Kafka 消费者组和一个 Redis 客户端，并且要响应
+    # 司机所等待的生命周期状态变更。
     mem_limit: 448m
     environment:
       SERVER_PORT: "8080"
-      # ZGC, not SerialGC. A driver tapping accept is waiting on this response, so pause
-      # time matters here in a way it does not for the fire-and-forget consumers.
+      # 用 ZGC 而非 SerialGC。司机点击接受时正在等待这个响应，所以这里的停顿
+      # 时间很重要，而对那些只管发不管结果的消费者则不然。
       JAVA_OPTS: "-XX:+UseZGC -XX:MaxRAMPercentage=50"
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
@@ -263,8 +256,8 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      # See ops/healthcheck.sh: a dependency-free probe that asserts the response body says
-      # UP, not merely that the port accepts connections.
+      # 见 ops/healthcheck.sh：一个无第三方依赖的探测脚本，会断言响应体内容
+      # 为 UP，而不只是端口能接受连接。
       test: ["CMD", "/app/healthcheck.sh"]
       interval: 10s
       timeout: 5s
@@ -280,9 +273,8 @@ services:
       dockerfile: ops/Dockerfile
       args:
         SERVICE: notification-service
-    # Hard ceiling. The JVM reads this cgroup limit for MaxRAMPercentage, so the two
-    # numbers are linked: changing one without the other either wastes memory or
-    # invites an OOM kill.
+    # 硬性上限。JVM 会读取这个 cgroup 限制作为 MaxRAMPercentage 的基数，因此两
+    # 个数字是联动的：只改其中一个，要么浪费内存，要么招来 OOM 杀掉。
     mem_limit: 320m
     environment:
       SERVER_PORT: "8080"
@@ -298,8 +290,8 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      # See ops/healthcheck.sh: a dependency-free probe that asserts the response body says
-      # UP, not merely that the port accepts connections.
+      # 见 ops/healthcheck.sh：一个无第三方依赖的探测脚本，会断言响应体内容
+      # 为 UP，而不只是端口能接受连接。
       test: ["CMD", "/app/healthcheck.sh"]
       interval: 10s
       timeout: 5s
@@ -315,9 +307,8 @@ services:
       dockerfile: ops/Dockerfile
       args:
         SERVICE: billing-service
-    # Hard ceiling. The JVM reads this cgroup limit for MaxRAMPercentage, so the two
-    # numbers are linked: changing one without the other either wastes memory or
-    # invites an OOM kill.
+    # 硬性上限。JVM 会读取这个 cgroup 限制作为 MaxRAMPercentage 的基数，因此两
+    # 个数字是联动的：只改其中一个，要么浪费内存，要么招来 OOM 杀掉。
     mem_limit: 320m
     environment:
       SERVER_PORT: "8080"
@@ -333,8 +324,8 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      # See ops/healthcheck.sh: a dependency-free probe that asserts the response body says
-      # UP, not merely that the port accepts connections.
+      # 见 ops/healthcheck.sh：一个无第三方依赖的探测脚本，会断言响应体内容
+      # 为 UP，而不只是端口能接受连接。
       test: ["CMD", "/app/healthcheck.sh"]
       interval: 10s
       timeout: 5s
@@ -344,10 +335,10 @@ services:
       - ride-net
 
   prometheus:
-    image: prom/prometheus:v2.54.1
+    image: prom/prometheus:v3.14.0
     profiles: ["observability"]
-    # Memory scales with active time series. The SLO histogram buckets are the main driver,
-    # which is why ObservabilityDefaults enables them on an allow-list rather than globally.
+    # 内存随活跃时间序列数增长。SLO 直方图桶是主要驱动因素，这正是
+    # ObservabilityDefaults 采用白名单而非全局方式启用它们的原因。
     mem_limit: 384m
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -361,11 +352,11 @@ services:
       - ride-net
 
   grafana:
-    image: grafana/grafana:11.2.0
+    image: grafana/grafana:13.2.2
     profiles: ["observability"]
     mem_limit: 320m
     environment:
-      # Local-only stack; anonymous admin keeps the load-test screenshots frictionless.
+      # 仅限本地使用的环境；匿名管理员账号让负载测试截图畅通无阻。
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
       GF_AUTH_DISABLE_LOGIN_FORM: "true"

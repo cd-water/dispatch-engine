@@ -1,18 +1,18 @@
 package com.ridematching.domain.driver;
 
 /**
- * Vehicle tier a rider can request. Used as a hard filter during candidate selection:
- * a rider requesting {@link #XL} is never offered a {@link #STANDARD} vehicle.
+ * 乘客可以请求的车型档位。在候选筛选中用作硬性过滤条件：
+ * 请求 {@link #XL} 的乘客永远不会被派给 {@link #STANDARD} 车辆。
  */
 public enum VehicleClass {
 
-    /** Four seats. The default tier. */
+    /** 四个座位。默认档位。 */
     STANDARD(4),
 
-    /** Six or more seats. */
+    /** 六个及以上座位。 */
     XL(6),
 
-    /** Four seats, premium vehicle. */
+    /** 四个座位，高端车辆。 */
     PREMIUM(4);
 
     private final int seats;
@@ -25,7 +25,7 @@ public enum VehicleClass {
         return seats;
     }
 
-    /** Whether a vehicle of this class can serve a request for {@code requested}. */
+    /** 该档位的车辆能否满足对 {@code requested} 档位的请求。 */
     public boolean canServe(VehicleClass requested) {
         return this == requested;
     }

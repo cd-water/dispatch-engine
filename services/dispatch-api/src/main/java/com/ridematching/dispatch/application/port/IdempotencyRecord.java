@@ -4,14 +4,14 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * A stored idempotency key.
+ * 一条已存储的幂等键。
  *
- * @param key          the client-supplied key
- * @param requestHash  hash of the request that first claimed it
- * @param inProgress   whether the original request is still running
- * @param rideId       the ride created, once known
- * @param responseStatus stored HTTP status, once complete
- * @param responseBody stored response body, replayed verbatim on retry
+ * @param key          客户端提供的键
+ * @param requestHash  最初抢占它的那个请求的哈希
+ * @param inProgress   原始请求是否仍在运行
+ * @param rideId       已创建的行程，一旦可知
+ * @param responseStatus 已存储的 HTTP 状态，完成后才有
+ * @param responseBody 已存储的响应体，重试时原样重放
  */
 public record IdempotencyRecord(
         String key,

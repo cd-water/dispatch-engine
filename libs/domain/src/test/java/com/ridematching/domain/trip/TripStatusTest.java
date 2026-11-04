@@ -22,10 +22,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TripStatusTest {
 
     /**
-     * The complete set of legal transitions, written out independently of the production
-     * table. The exhaustive test below compares every one of the 8x8 pairs against this,
-     * so a transition silently added to {@link TripStatus} fails the build rather than
-     * quietly widening what the system permits.
+     * 全部合法转换的集合，独立于生产代码中的表逐条写出。下方的穷举测试会把 8x8 的
+     * 每一对都与此集合比对，因此 {@link TripStatus} 中被悄悄新增的转换会让构建失败，
+     * 而不是无声地放宽系统所允许的范围。
      */
     private static final Set<List<TripStatus>> LEGAL = Set.of(
             List.of(REQUESTED, MATCHING),
@@ -107,8 +106,8 @@ class TripStatusTest {
     @Test
     @DisplayName("driver-holding states match the unique index predicate from ADR-0004")
     void driverHoldingStatesMatchTheDatabaseConstraint() {
-        // If this ever disagrees with uniq_driver_active_trip, the concurrency guarantee
-        // has a hole: a state the domain treats as holding a driver but the index ignores.
+        // 如果这里与 uniq_driver_active_trip 一旦不一致，并发保证就出现了漏洞：
+        // 领域认为该状态持有司机，而唯一索引却忽略了它。
         assertThat(OFFERED.holdsDriver()).isTrue();
         assertThat(ACCEPTED.holdsDriver()).isTrue();
         assertThat(IN_PROGRESS.holdsDriver()).isTrue();
@@ -139,8 +138,7 @@ class TripStatusTest {
     @Test
     @DisplayName("every non-terminal state can reach a terminal state")
     void noDeadEnds() {
-        // Guards against a state that is neither terminal nor able to finish — a trip
-        // that could get stuck forever.
+        // 防范既非终态又无法走完的状态——行程可能永远卡住。
         for (TripStatus from : TripStatus.values()) {
             if (from.isTerminal()) {
                 continue;

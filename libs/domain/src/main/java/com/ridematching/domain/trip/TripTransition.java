@@ -6,18 +6,18 @@ import java.time.Instant;
 import java.util.Optional;
 
 /**
- * One recorded state change, appended to the trip's history and never modified.
+ * 一次被记录下来的状态变更，追加到行程的历史中且永不被修改。
  *
- * <p>This is the in-memory form of the {@code trip_events} table: an append-only audit
- * trail that answers "why is this trip in this state?" without inference. When a rider
- * disputes a fare or a driver disputes an assignment, the sequence of transitions with
- * their reasons is the record.
+ * <p>它是 {@code trip_events} 表在内存中的形态：一条只追加的审计
+ * 轨迹，无需推断就能回答“这个行程为什么会处于这个状态？”。当乘客
+ * 对车费提出争议，或司机对一次指派提出异议时，这一串转换
+ * 连同各自的原因就是记录本身。
  *
- * @param from      state left behind; null for the initial transition into REQUESTED
- * @param to        state entered
- * @param driverId  driver involved, if any
- * @param reason    short human-readable cause, e.g. "offer expired", "rider cancelled"
- * @param occurredAt when the change happened
+ * @param from      被离开的状态；初始进入 REQUESTED 的那次转换时为 null
+ * @param to        进入的状态
+ * @param driverId  涉及的司机，如果有的话
+ * @param reason    简短的、人类可读的原因，例如“offer expired”（报价过期）、“rider cancelled”（乘客取消）
+ * @param occurredAt 变更发生的时间
  */
 public record TripTransition(
         TripStatus from,

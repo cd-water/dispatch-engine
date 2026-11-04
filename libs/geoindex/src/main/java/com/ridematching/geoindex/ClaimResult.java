@@ -3,19 +3,19 @@ package com.ridematching.geoindex;
 import java.util.Optional;
 
 /**
- * Outcome of attempting to claim a driver (ADR-0004).
+ * 尝试认领一个司机的结果（ADR-0004）。
  *
- * @param won        whether this caller holds the claim
- * @param fenceToken monotonic token proving which claim is newest; present only when won
- * @param reason     why the claim was refused; present only when lost
+ * @param won        本次调用方是否持有该认领
+ * @param fenceToken 证明哪个认领是最新的单调令牌；仅在获胜时存在
+ * @param reason     认领被拒绝的原因；仅在失败时存在
  */
 public record ClaimResult(boolean won, Long fenceToken, String reason) {
 
-    /** The driver was already claimed by another worker. */
+    /** 该司机已被其他工作者认领。 */
     public static final String ALREADY_CLAIMED = "ALREADY_CLAIMED";
-    /** The driver is not in AVAILABLE state (on a trip, or reserved). */
+    /** 该司机不处于 AVAILABLE 状态（正在行程中，或已被预留）。 */
     public static final String NOT_AVAILABLE = "NOT_AVAILABLE";
-    /** No state hash: the driver is offline or was evicted as stale. */
+    /** 没有状态哈希：司机已下线，或作为失联司机被清除。 */
     public static final String UNKNOWN_DRIVER = "UNKNOWN_DRIVER";
 
     public static ClaimResult won(long fenceToken) {

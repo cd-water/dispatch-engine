@@ -5,15 +5,14 @@ import com.ridematching.domain.geo.Coordinates;
 import java.util.Objects;
 
 /**
- * A candidate returned by a proximity search, with the distance the index computed.
+ * 一次邻近搜索返回的候选司机，带有索引计算出的距离。
  *
- * <p>The distance comes from Redis {@code GEOSEARCH} rather than being recomputed here: it is
- * the value the index actually ranked by, so carrying it forward keeps the matching engine's
- * ordering consistent with the query that produced it.
+ * <p>这个距离来自 Redis {@code GEOSEARCH}，而不是在这里重新计算：它正是索引实际用来排序的
+ * 那个值，因此把它一路携带下去能让匹配引擎的排序与产生它的那次查询保持一致。
  *
- * @param driverId       the candidate
- * @param coordinates    their last reported position
- * @param distanceMeters straight-line distance from the search origin
+ * @param driverId       候选司机
+ * @param coordinates    其最近一次上报的位置
+ * @param distanceMeters 距搜索原点的直线距离
  */
 public record NearbyDriver(DriverId driverId, Coordinates coordinates, double distanceMeters) {
 

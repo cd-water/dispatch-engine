@@ -11,28 +11,25 @@ import org.springframework.context.annotation.Bean;
 import java.time.Duration;
 
 /**
- * Metric defaults applied to every service.
+ * 应用到每个服务的指标默认值。
  *
- * <p>The project's SLOs are stated as p99s (README), and a p99 cannot be computed from a
- * plain timer — Micrometer publishes only count, sum and max unless histogram buckets are
- * enabled. This turns them on centrally so no service can accidentally ship without the
- * one statistic the load tests are judged on.
+ * <p>本项目的 SLO 以 p99 表述（见 README），而 p99 无法由普通计时器计算得出——若不启用直方图桶，
+ * Micrometer 只会发布 count、sum 和 max。这里集中开启它，使任何服务都不会在缺少负载测试
+ * 唯一评判依据的那个统计量时被意外发布上线。
  *
- * <p>Percentiles are published as histogram buckets rather than client-side percentiles so
- * Prometheus can aggregate them correctly across instances: a client-side p99 cannot be
- * averaged across replicas without being wrong.
+ * <p>百分位数以直方图桶的形式发布，而不是客户端侧百分位数，这样 Prometheus 才能在多个实例间
+ * 正确聚合：客户端侧的 p99 若在多个副本之间求平均必然是错的。
  *
- * <p>Registered as an auto-configuration rather than a {@code @Configuration} because the
- * services do not component-scan {@code com.ridematching.platform} — they scan their own
- * package. Auto-configuration means adding the platform dependency is enough.
+ * <p>注册为自动配置而非 {@code @Configuration}，因为各个服务并不对 {@code com.ridematching.platform}
+ * 做组件扫描——它们只扫描自己的包。自动配置意味着只需加上 platform 依赖即可生效。
  */
 @AutoConfiguration
 @ConditionalOnClass(MeterRegistry.class)
 public class ObservabilityDefaults {
 
     /**
-     * Meters that get histogram buckets. Buckets multiply time-series cardinality, so this
-     * is a deliberate allow-list rather than a blanket setting.
+     * 获得直方图桶的计量项。桶会成倍放大时间序列基数，因此这是一份刻意维护的白名单，
+     * 而不是一刀切的设置。
      */
     private static final String[] TIMED_METER_PREFIXES = {
             "http.server.requests",
@@ -51,8 +48,8 @@ public class ObservabilityDefaults {
                 }
                 return DistributionStatisticConfig.builder()
                         .percentilesHistogram(true)
-                        // SLO boundaries from the README. Explicit buckets let Prometheus
-                        // answer "what fraction breached the SLO?" directly.
+                        // 来自 README 的 SLO 边界。显式的桶让 Prometheus 能直接回答
+                        // "有多大比例突破了 SLO？"。
                         .serviceLevelObjectives(
                                 (double) Duration.ofMillis(50).toNanos(),
                                 (double) Duration.ofMillis(120).toNanos(),

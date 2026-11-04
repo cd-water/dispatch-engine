@@ -15,14 +15,14 @@
   <name>billing-service</name>
   <description>Downstream consumer: fare calculation on trip completion.</description>
 
-  <!-- Common dependencies and the Spring Boot repackage goal are inherited from
-       services/pom.xml. Add only what is specific to this service. -->
+  <!-- 公共依赖和 Spring Boot 的 repackage goal 都继承自
+       services/pom.xml。这里只添加本服务特有的内容。 -->
   <dependencies>
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-kafka</artifactId>
     </dependency>
-    <!-- Redis holds the de-duplication markers for at-least-once delivery (ADR-0003). -->
+    <!-- Redis 保存用于至少一次投递的去重标记（ADR-0003）。 -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-data-redis</artifactId>

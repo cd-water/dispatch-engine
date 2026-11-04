@@ -17,15 +17,13 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * The ingest hot path: validate, throttle, buffer, flush.
+ * 摄取热点路径：校验、节流、缓冲、刷写。
  *
- * <p>Roughly 10,000 frames per second pass through here at target load, so the work done per
- * frame is deliberately small — a bounds check, one distance calculation, and an enqueue. The
- * Redis round trip happens on a separate flush, never on the caller's thread.
+ * <p>目标负载下大约每秒有 10,000 帧经过这里，所以每帧的工作被刻意做得很少——一次边界检查、
+ * 一次距离计算、一次入队。Redis 往返发生在单独的刷写里，绝不在调用方线程上。
  *
- * <p>Constructed with plain arguments rather than annotated for injection so it can be unit
- * tested against a fake index and a {@code SimpleMeterRegistry} with no Spring context; the
- * Spring wiring lives in {@link LocationIngestConfiguration}.
+ * <p>用普通参数构造而不是注解注入，这样它可以在没有 Spring 上下文的情况下，针对 fake 索引和
+ * {@code SimpleMeterRegistry} 做单元测试；Spring 装配住在 {@link LocationIngestConfiguration}。
  */
 public class LocationIngestService {
 
@@ -34,12 +32,11 @@ public class LocationIngestService {
     private final Clock clock;
 
     /**
-     * Last position actually written, per driver.
+     * 每个司机最后一次真正写入的位置。
      *
-     * <p>Per-instance rather than shared, which is correct because a driver holds one
-     * WebSocket to one instance: that instance sees every frame for that driver and nobody
-     * else sees any. A shared cache would add a network hop to the hottest path in the system
-     * to synchronise state only one node can observe.
+     * <p>按实例持有而非共享，这是正确的，因为一个司机只连一个实例的 WebSocket：该实例能看到
+     * 这个司机的每一帧，而其他节点一帧都看不到。共享缓存会在系统最热的路径上增加一次网络
+     * 往返，只为同步一个只有单一节点能观察到的状态。
      */
     private final Map<DriverId, DriverLocation> lastPersisted = new ConcurrentHashMap<>();
 
@@ -71,20 +68,19 @@ public class LocationIngestService {
         this.flushTimer = Timer.builder("location.ingest.duration")
                 .description("Time to flush one batch to the index").register(meters);
 
-        // An explicit lambda rather than Collection::size. A method reference passes the
-        // queue as the receiver, and the IDE's null analysis cannot prove that satisfies
-        // Micrometer's @NonNull functional descriptor — a false positive, but a permanent
-        // warning teaches you to stop reading the warnings panel.
+        // 显式 lambda 而非 Collection::size。方法引用会把队列作为接收者传入，而 IDE 的空值
+        // 分析无法证明它满足 Micrometer 的 @NonNull 函数式描述符——这是一个误报，但一个永远
+        // 存在的警告会教人不再看警告面板。
         Gauge.builder("location.buffer.depth", this.buffer, queue -> (double) queue.size())
                 .description("Frames waiting to be written to the index")
                 .register(meters);
     }
 
     /**
-     * Handles one frame. Returns whether it was queued for persistence.
+     * 处理一帧。返回它是否被排入持久化队列。
      *
-     * <p>Never blocks and never throws on a full buffer — the caller is a WebSocket read loop,
-     * and stalling it would apply backpressure to a driver who cannot slow down anyway.
+     * <p>缓冲区满时绝不阻塞、绝不抛异常——调用方是 WebSocket 读取循环，卡住它等于向一个
+     * 本来就无法放慢的司机施加背压。
      */
     public boolean ingest(DriverLocation frame) {
         if (frame.isSkewedBeyond(clock.instant(), properties.getMaxClockSkew())) {
@@ -97,12 +93,12 @@ public class LocationIngestService {
             return false;
         }
 
-        // Recorded as persisted at enqueue time, not at flush time. The alternative lets a
-        // burst of frames for one driver all pass the throttle while the batch is in flight.
+        // 在入队时而不是刷写时记录为已持久化。否则在一个司机的批量刷写尚未完成期间，
+        // 一连串帧会全部通过节流。
         lastPersisted.put(frame.driverId(), frame);
 
         if (!buffer.offer(frame)) {
-            // Drop-oldest: the discarded frame is by definition more stale than this one.
+            // 丢弃最旧：被丢弃的帧按定义比这一帧更陈旧。
             buffer.poll();
             dropped.increment();
             buffer.offer(frame);
@@ -129,7 +125,7 @@ public class LocationIngestService {
         return frame.distanceMetersTo(previous) < properties.getMinMovementMeters();
     }
 
-    /** Drains up to one batch and writes it. Returns the number of frames written. */
+    /** 排空最多一批并写入。返回写入的帧数。 */
     public int flush() {
         List<DriverLocation> batch = new ArrayList<>(properties.getFlushBatchSize());
         buffer.drainTo(batch, properties.getFlushBatchSize());
@@ -140,23 +136,23 @@ public class LocationIngestService {
         return batch.size();
     }
 
-    /** A driver connected. */
+    /** 一位司机连接了。 */
     public void onConnect(DriverId driverId) {
         index.markOnline(driverId);
     }
 
-    /** A driver disconnected: forget their throttle state and drop them from the index. */
+    /** 一位司机断开了：忘掉他的节流状态，并把他从索引中移除。 */
     public void onDisconnect(DriverId driverId) {
         lastPersisted.remove(driverId);
         index.markOffline(driverId);
     }
 
-    /** Frames waiting to be written. */
+    /** 等待写入的帧数。 */
     public int bufferDepth() {
         return buffer.size();
     }
 
-    /** Drivers this instance is tracking for throttling purposes. */
+    /** 本实例为节流而跟踪的司机数。 */
     public int trackedDrivers() {
         return lastPersisted.size();
     }

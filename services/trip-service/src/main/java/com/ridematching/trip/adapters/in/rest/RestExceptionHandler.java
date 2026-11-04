@@ -18,23 +18,21 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Turns lifecycle failures into RFC 7807 {@code application/problem+json} responses.
+ * 把生命周期失败转换为 RFC 7807 {@code application/problem+json} 响应。
  *
- * <p>The distinction this makes is the point of it. Three different things can stop a
- * transition, and a caller has to act differently on each:
+ * <p>它做出的区分正是它的意义所在。有三类不同的事情会阻止一次转换，而调用方对每一类的
+ * 反应都必须不同：
  *
  * <ul>
- *   <li><strong>409 from an illegal transition</strong> — the trip is in a state where this
- *       move is not allowed. Retrying will never work; re-read and decide again.</li>
- *   <li><strong>409 from a concurrent modification</strong> — the move might well be legal,
- *       but someone else wrote first. Retrying immediately is the right response, and
- *       {@code Retry-After} says so.</li>
- *   <li><strong>404</strong> — no such trip.</li>
+ *   <li><strong>非法转换导致的 409</strong>——行程处于不允许此迁移的状态。重试永远不会
+ *       成功；重新读取后重新决策。</li>
+ *   <li><strong>并发修改导致的 409</strong>——这次迁移本身很可能是合法的，只是别人先写了。
+ *       立即重试才是正确反应，{@code Retry-After} 也这样提示。</li>
+ *   <li><strong>404</strong>——不存在这样的行程。</li>
  * </ul>
  *
- * <p>Collapsing the first two into one status without distinguishing them in the body would
- * leave a client either retrying forever on a permanent rejection or giving up on a transient
- * one. The status codes match; the {@code title} is what tells them apart.
+ * <p>把前两者合并成一个状态码、又不在响应体里加以区分，会让客户端要么在一个永久性拒绝上
+ * 永远重试，要么在一个暂时性拒绝上放弃。状态码相同；区分它们的是 {@code title}。
  */
 @RestControllerAdvice
 public class RestExceptionHandler {
@@ -42,10 +40,10 @@ public class RestExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(RestExceptionHandler.class);
 
     /**
-     * The state machine refused the move.
+     * 状态机拒绝了这次迁移。
      *
-     * <p>The message names both states, because "409 Conflict" on its own leaves the caller
-     * guessing whether they were too early, too late, or simply wrong.
+     * <p>消息同时点明两个状态，因为单凭一句 "409 Conflict" 只会让调用方去猜：是太早了、
+     * 太晚了，还是根本就是错的。
      */
     @ExceptionHandler(IllegalTripTransitionException.class)
     public ResponseEntity<ProblemDetail> onIllegalTransition(IllegalTripTransitionException e) {
@@ -56,10 +54,10 @@ public class RestExceptionHandler {
     }
 
     /**
-     * Someone else wrote first. Retryable, and the header says so.
+     * 别人先写了。可重试，响应头也这样提示。
      *
-     * <p>Logged at debug, not error: under contention this is optimistic locking doing its
-     * job, and a busy hour should not read as an incident.
+     * <p>按 debug 记录而非 error：在争用下这正是乐观锁在履行职责，一个繁忙的小时不该被
+     * 读成一次事故。
      */
     @ExceptionHandler(ConcurrentTripModificationException.class)
     public ResponseEntity<ProblemDetail> onConcurrentModification(ConcurrentTripModificationException e) {
@@ -72,7 +70,7 @@ public class RestExceptionHandler {
                 .body(problem);
     }
 
-    /** The {@code uniq_driver_active_trip} index refused the write (ADR-0004). */
+    /** {@code uniq_driver_active_trip} 索引拒绝了这次写入（ADR-0004）。 */
     @ExceptionHandler(DriverAlreadyAssignedException.class)
     public ResponseEntity<ProblemDetail> onDriverAlreadyAssigned(DriverAlreadyAssignedException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT,
@@ -89,7 +87,7 @@ public class RestExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(problem);
     }
 
-    /** Bean validation rejected the body — today, only a missing cancellation reason. */
+    /** Bean 校验拒绝了请求体——目前只会是缺少取消原因。 */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ProblemDetail> onValidationFailure(MethodArgumentNotValidException e) {
         Map<String, String> errors = new LinkedHashMap<>();
@@ -104,7 +102,7 @@ public class RestExceptionHandler {
         return ResponseEntity.badRequest().body(problem);
     }
 
-    /** A well-formed request the domain still rejects — a malformed id, an unknown enum. */
+    /** 格式正确但领域层仍然拒绝的请求——格式错误的 id，未知的枚举值。 */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ProblemDetail> onInvalidArgument(IllegalArgumentException e) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, e.getMessage());

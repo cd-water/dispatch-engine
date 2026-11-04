@@ -6,36 +6,35 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Matching tuning. Every value is a trade-off between rider wait time and match quality, so
- * all of them are configuration the load tests can sweep rather than constants in code.
+ * 匹配调优。每个值都是乘客等待时间与匹配质量之间的权衡，所以它们全都是负载测试可以扫描的
+ * 配置，而不是代码中的常量。
  */
 @ConfigurationProperties(prefix = "ridematching.matching")
 public class MatchingProperties {
 
     /**
-     * Expanding search radii, in metres, tried in order.
+     * 按顺序尝试的扩展搜索半径，单位米。
      *
-     * <p>Starting narrow keeps the common case cheap and the pickup close; widening only when
-     * nothing is claimable avoids telling a rider there are no drivers when there is one a
-     * little further out.
+     * <p>从窄开始让常见情况便宜且上车点更近；只在无可认领司机时才扩大，避免在稍远处明明
+     * 有司机的情况下告诉乘客没有司机。
      */
     private List<Double> searchRadiiMeters = List.of(2_000.0, 3_200.0, 5_000.0);
 
-    /** Candidates fetched per radius. Bounded because each one may cost a claim round trip. */
+    /** 每个半径取回的候选数。有上限，因为每一个都可能花费一次认领往返。 */
     private int candidateLimit = 30;
 
     /**
-     * How long a claim is held before Redis expires it.
+     * 认领在 Redis 让它过期之前保持多久。
      *
-     * <p>Longer than the offer TTL on purpose: the claim must outlive the offer so a driver
-     * cannot be re-claimed in the gap between an offer expiring and the engine noticing.
+     * <p>刻意长于报价 TTL：认领必须比报价活得久，这样司机就不会在报价过期与引擎察觉之间的
+     * 间隙里被再次认领。
      */
     private Duration claimTtl = Duration.ofSeconds(10);
 
-    /** How long a driver has to accept before the offer lapses. */
+    /** 司机在多长时间内必须接受，否则报价失效。 */
     private Duration offerTtl = Duration.ofSeconds(8);
 
-    /** Overall budget: after this, the request is reported UNMATCHED. */
+    /** 总预算：超过此时间后，请求被报告为 UNMATCHED。 */
     private Duration matchingSla = Duration.ofSeconds(30);
 
     public List<Double> getSearchRadiiMeters() {

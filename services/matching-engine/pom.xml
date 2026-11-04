@@ -15,10 +15,10 @@
   <name>matching-engine</name>
   <description>Consumes ride requests, ranks candidates, claims drivers.</description>
 
-  <!-- Common dependencies and the Spring Boot repackage goal are inherited from
-       services/pom.xml. Add only what is specific to this service. -->
+  <!-- 公共依赖和 Spring Boot 的 repackage goal 都继承自
+       services/pom.xml。这里只添加本服务特有的内容。 -->
   <dependencies>
-    <!-- Searches the same index location-service writes, and claims drivers in it. -->
+    <!-- 搜索 location-service 写入的同一个索引，并在其中认领司机。 -->
     <dependency>
       <groupId>com.ridematching</groupId>
       <artifactId>geoindex</artifactId>

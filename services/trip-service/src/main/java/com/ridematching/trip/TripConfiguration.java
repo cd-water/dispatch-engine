@@ -28,8 +28,8 @@ import java.time.Clock;
 import java.time.Duration;
 
 /**
- * Wires the trip service. All Spring knowledge lives here so the use cases and adapters stay
- * constructible by hand in tests (ADR-0001).
+ * 装配行程服务。所有 Spring 知识都集中在这里，好让用例和适配器在测试中仍可手工构造
+ * （ADR-0001）。
  */
 @Configuration
 @EnableScheduling
@@ -59,8 +59,8 @@ public class TripConfiguration implements SchedulingConfigurer {
 
     @Bean
     public static RedisKeys redisKeys(@Value("${ridematching.matching.city:default}") String city) {
-        // The same property the matching engine reads. Two services pointed at different
-        // cities would each see an empty half of the key space, with nothing failing loudly.
+        // 与匹配引擎读取的是同一个属性。若两个服务指向了不同的城市，各自都只会看到
+        // 键空间里空的一半，而且不会有任何东西明显报错。
         return new RedisKeys(city);
     }
 
@@ -119,21 +119,18 @@ public class TripConfiguration implements SchedulingConfigurer {
     }
 
     /**
-     * Two background loops, on very different intervals.
+     * 两个后台循环，间隔差异很大。
      *
-     * <p>The outbox drain is on the request path's critical timeline — an event sitting in the
-     * outbox is a notification the rider has not received — so it runs every 200ms. The claim
-     * reconciler is a safety net for a case that should not happen at all, and sweeping the
-     * Redis keyspace has a cost, so it runs every 30 seconds. Making it faster would not make
-     * the system more correct, only busier.
+     * <p>发件箱排空处于请求路径的关键时间线上——滞留在发件箱里的事件就是乘客还没来得及收到
+     * 的通知——所以它每 200ms 运行一次。认领调和器是兜底机制，针对一个本就不该发生的情况，
+     * 而扫描 Redis 键空间是有成本的，所以它每 30 秒运行一次。让它更快不会让系统更正确，只会
+     * 更忙。
      *
-     * <p>Fixed delay rather than fixed rate for both: if a pass outlasts its interval, fixed
-     * rate would stack overlapping passes onto whatever is already struggling.
+     * <p>两者都用固定延迟而不是固定频率：如果某一轮耗时超过了间隔，固定频率会把重叠的轮次
+     * 堆到已经吃力的东西上。
      *
-     * <p>Both intervals are properties so a test can push them out of the way. A background
-     * loop polling the same tables a test is truncating produces rollback errors that belong
-     * to the harness rather than the code, and a green build that prints ERROR teaches people
-     * to stop reading the log.
+     * <p>两个间隔都是可配置属性，测试可以把它们挪开。后台循环轮询测试正在清空的同一批表，
+     * 会产生属于测试夹具而非代码的回滚错误；一个打印 ERROR 的绿色构建，会教人们不再看日志。
      */
     @Override
     public void configureTasks(ScheduledTaskRegistrar registrar) {
